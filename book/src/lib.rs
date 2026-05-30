@@ -9,9 +9,11 @@
 #![forbid(unsafe_code)]
 
 mod book;
+mod btree;
 mod event;
 mod price;
 
 pub use book::OrderBook;
+pub use btree::BTreeBook;
 pub use event::{BookEvent, EventKind, Side};
 pub use price::{Px, Qty};
