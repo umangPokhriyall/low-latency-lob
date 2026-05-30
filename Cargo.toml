@@ -1,5 +1,26 @@
 [workspace]
-
 resolver = "3"
+members = ["book", "sync", "feed", "bench", "engine"]
 
-members = ["arb_v1","arbitrage","collector"]
+[workspace.package]
+edition      = "2024"
+rust-version = "1.85"
+license      = "MIT OR Apache-2.0"
+
+[workspace.lints.rust]
+missing_debug_implementations = "warn"
+rust_2018_idioms              = "warn"
+
+[workspace.lints.clippy]
+all      = { level = "deny",  priority = -1 }
+pedantic = { level = "warn",  priority = -1 }
+
+[profile.release]
+opt-level     = 3
+lto           = "fat"
+codegen-units = 1
+panic         = "unwind"     # keep unwinding: the bench harness must catch & report the input that breaks
+
+[profile.bench]
+inherits = "release"
+debug    = true              # keep symbols for perf / flamegraph in Phase 9

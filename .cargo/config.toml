@@ -1,0 +1,4 @@
+# Microarchitecture profiling (Phase 9) is only valid against a known target.
+# Binaries are host-specific BY DESIGN; the benchmark host is documented in the README (Phase 10).
+[build]
+rustflags = ["-C", "target-cpu=native"]
