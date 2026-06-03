@@ -1,3 +1,11 @@
+// FROZEN — book v1 (Phase 2). Do not modify.
+// The `book` crate is the sans-IO core. New order-book implementations are
+// ADDITIVE (new file + new pub export + extend tests/oracle.rs) and must
+// satisfy the frozen `OrderBook` trait without changing this file. If a later
+// phase appears to need a change here, the design is wrong — STOP and ask.
+// The single permitted future edit is the two-line wiring of the Phase 5 `FlatBook`.
+// See docs/specs/phase2-spec.md §9 and git tag `book-v1-frozen`.
+
 //! `book` — the sans-IO limit-order-book core (the `core` of the kickoff brief,
 //! renamed to avoid shadowing Rust's built-in `core` crate).
 //!

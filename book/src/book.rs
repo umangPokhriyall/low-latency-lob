@@ -1,3 +1,10 @@
+// FROZEN — book v1 (Phase 2). Do not modify.
+// The `book` crate is the sans-IO core. New order-book implementations are
+// ADDITIVE (new file + new pub export + extend tests/oracle.rs) and must
+// satisfy the frozen `OrderBook` trait without changing this file. If a later
+// phase appears to need a change here, the design is wrong — STOP and ask.
+// See docs/specs/phase2-spec.md §9 and git tag `book-v1-frozen`.
+
 //! The `OrderBook` trait: one abstraction, many implementations (Phases 1, 2, 5).
 
 use crate::{BookEvent, Px, Qty, Side};
