@@ -1,0 +1,16 @@
+{
+  "binance_endpoints": [
+    "https://api.binance.com/api/v3/exchangeInfo?symbol=BTCUSDT",
+    "https://api.binance.com/api/v3/depth?symbol=BTCUSDT&limit=1000",
+    "wss://stream.binance.com:9443/ws (SUBSCRIBE btcusdt@depth@100ms/btcusdt@trade)"
+  ],
+  "captured_at_utc": "2026-06-03T19:13:38Z",
+  "duration_secs": 45,
+  "kind": "binance-recorded",
+  "record_count": 13765,
+  "recorder_version": 1,
+  "step_size": "0.00001000",
+  "symbol": "BTCUSDT",
+  "tick_size": "0.01000000",
+  "with_trades": true
+}

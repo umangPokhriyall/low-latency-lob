@@ -8,5 +8,31 @@ license.workspace      = true
 [lints]
 workspace = true
 
+[features]
+default = []
+recorder = [
+    "dep:tokio", "dep:tokio-tungstenite", "dep:futures-util",
+    "dep:serde", "dep:serde_json", "dep:tokio-rustls", "dep:webpki-roots",
+]
+
 [dependencies]
 book = { path = "../book" }
+# Async stack — QUARANTINED behind `recorder`. The default tree links none of these
+# (proven by `cargo tree -p feed`). Versions pinned via `cargo add` (Rust 1.85 compatible).
+# The two REST GETs (exchangeInfo, depth snapshot) reuse the SAME rustls/ring + webpki
+# roots that tokio-tungstenite already pulls in for wss — no extra HTTP-client crate.
+tokio             = { version = "1.52.3", features = ["rt-multi-thread", "macros", "net", "time", "signal", "sync"], optional = true }
+tokio-tungstenite = { version = "0.29.0", features = ["rustls-tls-webpki-roots"], optional = true }
+tokio-rustls      = { version = "0.26.4", default-features = false, features = ["ring", "tls12", "logging"], optional = true }
+webpki-roots      = { version = "1.0.7", optional = true }
+futures-util      = { version = "0.3.32", optional = true }
+serde             = { version = "1.0.228", features = ["derive"], optional = true }
+serde_json        = { version = "1.0.150", optional = true }
+
+[[bin]]
+name = "gen"
+# default features only — pure lib, no async
+
+[[bin]]
+name = "recorder"
+required-features = ["recorder"]
