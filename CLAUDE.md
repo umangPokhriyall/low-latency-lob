@@ -55,3 +55,29 @@ correctly. An honest negative result with a profile beats a fake win.
 ## Host
 Binaries build with `target-cpu=native` by design (valid microarch profiling). They are
 host-specific; the benchmark host is documented in the README.
+
+## Authoritative specs
+- docs/specs/kickoff-brief.md  — strategy, the four-impl shootout, DoD culture
+- docs/specs/phase0-spec.md    — workspace, tick types, guardrail
+- docs/specs/phase1-spec.md    — event model, OrderBook trait, BTreeBook baseline
+- docs/specs/phase2-spec.md    — CURRENT: SortedVecBook, RevVecBook, oracle, FREEZE
+
+## Hard rules
+1. `book` is FROZEN after Phase 2 (tag `book-v1-frozen`). Frozen files in
+   book/src/ are immutable. The ONLY permitted future edit is Phase 5's additive
+   FlatBook: new file book/src/flat.rs + two lines in lib.rs + extend
+   tests/oracle.rs. No other change. Apparent need to edit frozen code = design
+   error -> STOP and ask.
+2. book has ZERO third-party dependencies, including dev-deps. No rand/proptest/
+   quickcheck — oracle randomness is the in-repo seeded SplitMix64.
+3. #![forbid(unsafe_code)] holds in book. No async, no I/O, no allocation on the
+   update path beyond amortized Vec growth.
+4. Correctness is defined by the differential oracle (observable trait surface
+   across all impls), not by internal representation. The book is a dumb
+   container: no crossed-book policing, no sequence validation.
+5. Measure, never guess: commit NO performance numbers in book. Layout reasoning
+   is hypothesis, owned by Phase 4.
+
+## Scope discipline
+Work ONLY on the given session. End with cargo build + clippy -D warnings + test
+(oracle included) green, a meaningful commit, a listed change summary, and STOP.

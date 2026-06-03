@@ -12,8 +12,10 @@ mod book;
 mod btree;
 mod event;
 mod price;
+mod sorted_vec;
 
 pub use book::OrderBook;
 pub use btree::BTreeBook;
 pub use event::{BookEvent, EventKind, Side};
 pub use price::{Px, Qty};
+pub use sorted_vec::SortedVecBook;
