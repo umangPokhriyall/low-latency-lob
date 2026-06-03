@@ -1,0 +1,11 @@
+{
+  "kind": "synthetic",
+  "profile": "flashcrash",
+  "seed": 1,
+  "events": 100000,
+  "mid": 65000,
+  "band": 64,
+  "max_qty": 1024,
+  "start_ts": 0,
+  "generator_version": 1
+}
