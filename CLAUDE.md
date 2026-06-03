@@ -59,25 +59,24 @@ host-specific; the benchmark host is documented in the README.
 ## Authoritative specs
 - docs/specs/kickoff-brief.md  — strategy, the four-impl shootout, DoD culture
 - docs/specs/phase0-spec.md    — workspace, tick types, guardrail
-- docs/specs/phase1-spec.md    — event model, OrderBook trait, BTreeBook baseline
-- docs/specs/phase2-spec.md    — CURRENT: SortedVecBook, RevVecBook, oracle, FREEZE
+- docs/specs/phase1-spec.md    — event model, OrderBook trait, BTreeBook
+- docs/specs/phase2-spec.md    — Vec impls, differential oracle, FREEZE (tag book-v1-frozen)
+- docs/specs/phase3-spec.md    — CURRENT: feed (corpus, replay, synthetic, recorder)
 
 ## Hard rules
-1. `book` is FROZEN after Phase 2 (tag `book-v1-frozen`). Frozen files in
-   book/src/ are immutable. The ONLY permitted future edit is Phase 5's additive
-   FlatBook: new file book/src/flat.rs + two lines in lib.rs + extend
-   tests/oracle.rs. No other change. Apparent need to edit frozen code = design
-   error -> STOP and ask.
-2. book has ZERO third-party dependencies, including dev-deps. No rand/proptest/
-   quickcheck — oracle randomness is the in-repo seeded SplitMix64.
-3. #![forbid(unsafe_code)] holds in book. No async, no I/O, no allocation on the
-   update path beyond amortized Vec growth.
-4. Correctness is defined by the differential oracle (observable trait surface
-   across all impls), not by internal representation. The book is a dumb
-   container: no crossed-book policing, no sequence validation.
-5. Measure, never guess: commit NO performance numbers in book. Layout reasoning
-   is hypothesis, owned by Phase 4.
+1. book is FROZEN. feed builds events only via public BookEvent constructors.
+2. CORPUS BOUNDARY is absolute: floats/Strings only inside the recorder at the
+   parse edge; corpus + everything downstream are integer ticks. String->tick
+   conversion is EXACT integer arithmetic — no f64 anywhere, including the recorder.
+3. ASYNC QUARANTINE is Cargo-enforced: tokio/tokio-tungstenite/serde/serde_json
+   are optional deps behind the `recorder` feature, used only by the recorder
+   binary. Default feed tree = book only. bench/engine never link async.
+4. #![forbid(unsafe_code)] across feed (lib + both bins). Corpus is loaded by
+   safe, validated deserialization — never transmuting mapped bytes.
+5. feed is timing-free and deterministic: no sleep, no clock, no pacing in replay.
+   Same file/seed -> same bytes/events. Pacing + coordinated omission are Phase 4.
+6. Every committed corpus has a .meta.json provenance sidecar.
 
 ## Scope discipline
-Work ONLY on the given session. End with cargo build + clippy -D warnings + test
-(oracle included) green, a meaningful commit, a listed change summary, and STOP.
+Work ONLY on the given session. End green (build + clippy -D warnings + test; the
+recorder session also builds --features recorder), commit, list changes, STOP.
