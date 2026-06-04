@@ -27,7 +27,7 @@
 //! single preemption interleaves the producer's overwrite into the *middle* of a
 //! consumer's read (the torn-read scenario the witness must survive), because the
 //! producer's overwrite of an in-flight slot is itself one contiguous critical
-//! section. The model verifies green in ~120s. Each consumer also caps its own
+//! section. The model verifies green in ~165s. Each consumer also caps its own
 //! attempts (`MAX_ATTEMPTS`) so a drained consumer that only ever sees `Empty`
 //! cannot spin forever.
 //!
@@ -55,10 +55,12 @@ const W: usize = 2;
 const CAP: usize = 2;
 /// Records the producer pushes. 3 > CAP ⇒ at least one consumer can be lapped.
 const PUSHES: u64 = 3;
-/// Per-consumer attempt cap. Kept small (loom is exponential in shared-memory ops):
-/// a few attempts suffice for a consumer to deliver, hit `Empty`, or be lapped, and
-/// for the producer to interleave its overwrite into the middle of a read.
-const MAX_ATTEMPTS: usize = 4;
+/// Per-consumer attempt cap. Kept deliberately small — loom is exponential in
+/// shared-memory ops, and `try_recv`'s overrun path re-loads the write position (an
+/// extra tracked atomic), so each attempt is several interleaving points. Three
+/// attempts suffice for a consumer to deliver, hit `Empty`, or be lapped, and for
+/// the producer to interleave its overwrite into the middle of a read.
+const MAX_ATTEMPTS: usize = 3;
 
 /// Witness payload for a position: word `k` is `pos * W + k`.
 fn witness(pos: u64) -> [u64; W] {

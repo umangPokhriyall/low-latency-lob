@@ -284,7 +284,7 @@ impl<const W: usize> Consumer<W> {
         //      `cursor < w`, since position `cursor` has been published.
         let s1 = slot.stamp.load(Acquire);
         if s1 != self.cursor {
-            return self.resync(w);
+            return self.resync();
         }
 
         // (R2) Read the payload (Relaxed atomics: race-free; consistency proven by the
@@ -303,7 +303,7 @@ impl<const W: usize> Consumer<W> {
         fence(Acquire);
         let s2 = slot.stamp.load(Relaxed);
         if s2 != self.cursor {
-            return self.resync(w);
+            return self.resync();
         }
 
         self.cursor += 1;
@@ -312,7 +312,22 @@ impl<const W: usize> Consumer<W> {
 
     /// Resync after detecting an overrun: jump the cursor to the oldest record still
     /// resident in the ring and report how many positions were skipped.
-    fn resync(&mut self, w: u64) -> Recv<W> {
+    ///
+    /// Re-loads the write position FRESHLY (an Acquire load, not the `(R0)` snapshot
+    /// from the caller). This matters under heavy contention: between `(R0)` and the
+    /// `(R1)`/`(R3)` overwrite detection the producer can lap us by a full
+    /// `capacity`, so the `(R0)` snapshot may already be `capacity` or more behind the
+    /// true write position. Computing `oldest` from that stale value could place it
+    /// *behind* our cursor, and `saturating_sub` would then report `skipped == 0`
+    /// while the cursor jumped backward — re-delivering already-seen positions. A
+    /// fresh load guarantees `oldest >= cursor` (reaching resync means the slot was
+    /// overwritten to generation `>= cursor + capacity`, so the producer's current
+    /// write position is `>= cursor + capacity`, hence `oldest = w - capacity >=
+    /// cursor`): the cursor is monotonic and `skipped` is exact. Caught by the §5
+    /// overrun-detection stress test; loom's tiny model could not reach a full-`cap`
+    /// lap inside the `(R0)`→`(R1)` window.
+    fn resync(&mut self) -> Recv<W> {
+        let w = self.ring.write.v.load(Acquire); // fresh write position (see above)
         let oldest = w.saturating_sub(self.ring.capacity() as u64); // oldest resident position
         let skipped = oldest.saturating_sub(self.cursor);
         self.cursor = oldest;
