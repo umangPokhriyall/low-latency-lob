@@ -1,5 +1,37 @@
-//! `bench` — the open-loop, coordinated-omission-correct harness that drives each
-//! book variant from the corpus and emits interior latency distributions. Filled in Phase 4.
+//! `bench` — the measurement harness: a low-overhead TSC clock, an `HdrHistogram`
+//! recorder, pinning/warmup discipline, and the depth-sweep / CO-correct studies
+//! that produce the committed numbers under `bench/results/`. (Phase 4.)
+//!
+//! Subcommands: `service | read | sustained | throughput | plot | all`. Phase 4
+//! is built one session per benchmark; only the implemented ones run today.
 #![forbid(unsafe_code)]
 
-fn main() {}
+mod benches;
+mod clock;
+mod harness;
+mod recorder;
+mod workload;
+
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    let cmd = args.get(1).map_or("help", String::as_str);
+    let rest: &[String] = if args.len() > 2 { &args[2..] } else { &[] };
+
+    match cmd {
+        // Benchmark 1 — service-time depth sweep (the crossover). Session 1.
+        // `all` will chain every benchmark; today only `service` exists.
+        "service" | "all" => benches::service::run(rest),
+        // Implemented in later Phase 4 sessions (see docs/specs/phase4-spec.md).
+        "read" | "sustained" | "throughput" | "plot" => {
+            eprintln!("`{cmd}` lands in a later Phase 4 session; not yet implemented");
+            std::process::exit(2);
+        }
+        _ => {
+            eprintln!(
+                "usage: bench <service|read|sustained|throughput|plot|all> \
+                 [--samples N] [--warmup N] [--core N] [--out DIR]"
+            );
+            std::process::exit(2);
+        }
+    }
+}

@@ -60,23 +60,26 @@ host-specific; the benchmark host is documented in the README.
 - docs/specs/kickoff-brief.md  — strategy, the four-impl shootout, DoD culture
 - docs/specs/phase0-spec.md    — workspace, tick types, guardrail
 - docs/specs/phase1-spec.md    — event model, OrderBook trait, BTreeBook
-- docs/specs/phase2-spec.md    — Vec impls, differential oracle, FREEZE (tag book-v1-frozen)
-- docs/specs/phase3-spec.md    — CURRENT: feed (corpus, replay, synthetic, recorder)
+- docs/specs/phase2-spec.md    — Vec impls, differential oracle, FREEZE (book-v1-frozen)
+- docs/specs/phase3-spec.md    — feed: corpus, replay, synthetic, recorder
+- docs/specs/phase4-spec.md    — CURRENT: bench harness, depth sweep, CO-correct study, crossover
 
 ## Hard rules
-1. book is FROZEN. feed builds events only via public BookEvent constructors.
-2. CORPUS BOUNDARY is absolute: floats/Strings only inside the recorder at the
-   parse edge; corpus + everything downstream are integer ticks. String->tick
-   conversion is EXACT integer arithmetic — no f64 anywhere, including the recorder.
-3. ASYNC QUARANTINE is Cargo-enforced: tokio/tokio-tungstenite/serde/serde_json
-   are optional deps behind the `recorder` feature, used only by the recorder
-   binary. Default feed tree = book only. bench/engine never link async.
-4. #![forbid(unsafe_code)] across feed (lib + both bins). Corpus is loaded by
-   safe, validated deserialization — never transmuting mapped bytes.
-5. feed is timing-free and deterministic: no sleep, no clock, no pacing in replay.
-   Same file/seed -> same bytes/events. Pacing + coordinated omission are Phase 4.
-6. Every committed corpus has a .meta.json provenance sidecar.
+1. book + feed are FROZEN/done. All Phase 4 code lives in bench/. Drive impls by
+   monomorphization (run::<ConcreteBook>) — NEVER dyn OrderBook in a measured loop.
+2. MEASURE-NEVER-GUESS, operationalized:
+   - black_box every measured op's inputs AND outputs (defeat elision).
+   - Measure and RECORD clock overhead; never silently subtract it.
+   - Pin the thread; warm up untimed; record the CPU governor. >=1M samples/cell.
+   - Coordinated omission: response latency = completion - SCHEDULED arrival,
+     never completion - apply_start. Service-time benches have no arrival process
+     and must say so. Do not blur service time and response time.
+3. bench deps: hdrhistogram, quanta, core_affinity, plotters. NO tokio (feed is
+   used at default features). bench stays #![forbid(unsafe_code)].
+4. Numbers are committed to bench/results/ as CSV (source of truth) + .hgrm + SVG +
+   env.json. Plots cite their CSV. RESULTS.md is built ONLY from committed CSVs —
+   invent nothing; this is interim (3 impls), not the Phase 10 BENCHMARKS.md.
 
 ## Scope discipline
-Work ONLY on the given session. End green (build + clippy -D warnings + test; the
-recorder session also builds --features recorder), commit, list changes, STOP.
+Work ONLY on the given session. End green (build + clippy -D warnings + test),
+commit, list changes + headline numbers, STOP.
