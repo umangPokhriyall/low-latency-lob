@@ -3,4 +3,5 @@
 
 pub mod read;
 pub mod service;
+pub mod sustained;
 pub mod throughput;

@@ -57,6 +57,15 @@ impl BenchClock {
         self.overhead_ns
     }
 
+    /// Absolute nanoseconds elapsed since a `base` raw reading. The CO-correct
+    /// sustained loop (§3.1) takes one `base = raw()` at the start and compares
+    /// `now_since_ns(base)` against each event's scheduled arrival offset.
+    #[inline]
+    #[must_use]
+    pub fn now_since_ns(&self, base: u64) -> u64 {
+        self.delta_ns(base, self.raw())
+    }
+
     /// Median read-read delta over `OVERHEAD_ITERS` iterations. Both reads are
     /// `black_box`ed so the optimizer cannot fold the pair away (which would
     /// report a fictitious 0 ns floor).

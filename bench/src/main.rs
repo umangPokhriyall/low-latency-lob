@@ -24,15 +24,18 @@ fn main() {
         "read" => benches::read::run(rest),
         // Benchmark 4 — end-to-end replay throughput. Session 2.
         "throughput" => benches::throughput::run(rest),
-        // `all` chains every implemented benchmark (service + read + throughput
-        // today; the CO-correct sustained study and plots land in later sessions).
+        // Benchmark 3 — CO-correct sustained-feed response time. Session 3.
+        "sustained" => benches::sustained::run(rest),
+        // `all` chains every implemented benchmark (service + read + throughput +
+        // sustained today; the plots land in the final Phase 4 session).
         "all" => {
             benches::service::run(rest);
             benches::read::run(rest);
             benches::throughput::run(rest);
+            benches::sustained::run(rest);
         }
-        // Implemented in later Phase 4 sessions (see docs/specs/phase4-spec.md).
-        "sustained" | "plot" => {
+        // Implemented in the final Phase 4 session (see docs/specs/phase4-spec.md).
+        "plot" => {
             eprintln!("`{cmd}` lands in a later Phase 4 session; not yet implemented");
             std::process::exit(2);
         }
