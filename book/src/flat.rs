@@ -36,6 +36,16 @@ pub struct FlatBook {
 }
 
 impl FlatBook {
+    /// The allocated price span in ticks — the length of each per-side array.
+    /// Total memory is `2 * allocated_span_ticks() * size_of::<Qty>()` bytes (two
+    /// parallel arrays). Zero before lazy init. Exposed so the Phase 5
+    /// memory-vs-speed tradeoff is sourced (`bench/results/flat_memory.csv`), not
+    /// asserted; it reads internal state and so cannot live outside this module.
+    #[must_use]
+    pub fn allocated_span_ticks(&self) -> usize {
+        self.bid_qty.len()
+    }
+
     /// Ensure the flat arrays cover `px`. Lazily initializes around the first
     /// observed price; thereafter recenters/grows (phase5-spec §2.5) when `px`
     /// falls outside `[base, base + len)`. Panics if the required span exceeds

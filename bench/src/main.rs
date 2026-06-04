@@ -27,6 +27,8 @@ fn main() {
         "throughput" => benches::throughput::run(rest),
         // Benchmark 3 — CO-correct sustained-feed response time. Session 3.
         "sustained" => benches::sustained::run(rest),
+        // FlatBook allocated span (ticks + bytes) per config — the memory tradeoff.
+        "flatmem" => benches::flat_memory::run(rest),
         // Render every §9 figure + env.json strictly from the committed CSVs.
         "plot" => plot::run(rest),
         // `all` chains every benchmark then renders the plots + env.json last.
@@ -35,11 +37,12 @@ fn main() {
             benches::read::run(rest);
             benches::throughput::run(rest);
             benches::sustained::run(rest);
+            benches::flat_memory::run(rest);
             plot::run(rest);
         }
         _ => {
             eprintln!(
-                "usage: bench <service|read|sustained|throughput|plot|all> \
+                "usage: bench <service|read|sustained|throughput|flatmem|plot|all> \
                  [--samples N] [--warmup N] [--core N] [--out DIR]"
             );
             std::process::exit(2);

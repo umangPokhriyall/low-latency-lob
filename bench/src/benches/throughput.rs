@@ -16,7 +16,7 @@
 
 use crate::clock::BenchClock;
 use crate::harness;
-use book::{BTreeBook, BookEvent, OrderBook, RevVecBook, SortedVecBook};
+use book::{BTreeBook, BookEvent, FlatBook, OrderBook, RevVecBook, SortedVecBook};
 use feed::corpus::Corpus;
 use std::hint::black_box;
 use std::path::{Path, PathBuf};
@@ -61,12 +61,13 @@ fn replay_median<B: OrderBook>(clock: &BenchClock, events: &[BookEvent], runs: u
     totals[totals.len() / 2]
 }
 
-/// The monomorphized impl dispatch (no `dyn OrderBook`). Phase 5 adds `"flat"`.
+/// The monomorphized impl dispatch (no `dyn OrderBook`).
 fn run_impl(name: &str, clock: &BenchClock, events: &[BookEvent], runs: usize) -> u64 {
     match harness::for_impl(name) {
         Some("btree") => replay_median::<BTreeBook>(clock, events, runs),
         Some("sorted") => replay_median::<SortedVecBook>(clock, events, runs),
         Some("rev") => replay_median::<RevVecBook>(clock, events, runs),
+        Some("flat") => replay_median::<FlatBook>(clock, events, runs),
         _ => panic!("unknown impl `{name}` (expected one of {:?})", harness::IMPLS),
     }
 }
@@ -267,6 +268,6 @@ mod tests {
     fn run_impl_rejects_unknown() {
         let clock = BenchClock::new();
         let corpus = small_corpus();
-        let _ = run_impl("flat", &clock, corpus.events(), 1);
+        let _ = run_impl("nope", &clock, corpus.events(), 1);
     }
 }

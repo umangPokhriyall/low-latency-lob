@@ -1,0 +1,17 @@
+config,key,span_ticks,total_bytes
+service_depth,1,8193,131088
+service_depth,2,8193,131088
+service_depth,4,8193,131088
+service_depth,8,8193,131088
+service_depth,16,8193,131088
+service_depth,32,8193,131088
+service_depth,64,8193,131088
+service_depth,128,8193,131088
+service_depth,256,8193,131088
+service_depth,512,8193,131088
+service_depth,1024,8193,131088
+service_depth,2048,12291,196656
+corpus,steady,8193,131088
+corpus,burst,8193,131088
+corpus,flashcrash,8193,131088
+corpus,btcusdt-sample,5753082,92049312

@@ -3,8 +3,8 @@
 //! benchmark so the concrete type is named at the call site and `apply` inlines
 //! — there is **no `dyn OrderBook`** anywhere in a measured loop (phase1 §2.4).
 
-/// The three impls under test in Phase 4. Phase 5 appends `"flat"`.
-pub const IMPLS: [&str; 3] = ["btree", "sorted", "rev"];
+/// The four impls under test after Phase 5 (`"flat"` is the `FlatBook` addition).
+pub const IMPLS: [&str; 4] = ["btree", "sorted", "rev", "flat"];
 
 /// Pin the current thread to logical core `core` so sample-to-sample migration
 /// does not pollute ns measurements (§3.4). Returns whether pinning succeeded;
@@ -42,11 +42,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn impl_registry_is_the_three_phase4_books() {
-        assert_eq!(IMPLS, ["btree", "sorted", "rev"]);
+    fn impl_registry_is_the_four_books() {
+        assert_eq!(IMPLS, ["btree", "sorted", "rev", "flat"]);
         assert_eq!(for_impl("btree"), Some("btree"));
         assert_eq!(for_impl("rev"), Some("rev"));
-        assert_eq!(for_impl("flat"), None); // Phase 5
+        assert_eq!(for_impl("flat"), Some("flat")); // Phase 5 addition
         assert_eq!(for_impl("nope"), None);
     }
 

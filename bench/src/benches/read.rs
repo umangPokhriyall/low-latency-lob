@@ -20,7 +20,7 @@ use crate::clock::BenchClock;
 use crate::harness;
 use crate::recorder::Recorder;
 use crate::workload::build_at_depth;
-use book::{BTreeBook, OrderBook, Px, Qty, RevVecBook, Side, SortedVecBook};
+use book::{BTreeBook, FlatBook, OrderBook, Px, Qty, RevVecBook, Side, SortedVecBook};
 use std::hint::black_box;
 use std::path::{Path, PathBuf};
 
@@ -100,12 +100,13 @@ fn read_cell<B: OrderBook>(ctx: &Ctx<'_>) -> CellResult {
     CellResult { best_bid, top_n_8, top_n_full }
 }
 
-/// The monomorphized impl dispatch (no `dyn OrderBook`). Phase 5 adds `"flat"`.
+/// The monomorphized impl dispatch (no `dyn OrderBook`).
 fn run_impl(name: &str, ctx: &Ctx<'_>) -> CellResult {
     match harness::for_impl(name) {
         Some("btree") => read_cell::<BTreeBook>(ctx),
         Some("sorted") => read_cell::<SortedVecBook>(ctx),
         Some("rev") => read_cell::<RevVecBook>(ctx),
+        Some("flat") => read_cell::<FlatBook>(ctx),
         _ => panic!("unknown impl `{name}` (expected one of {:?})", harness::IMPLS),
     }
 }
@@ -324,7 +325,7 @@ mod tests {
         assert_eq!(book.best_bid().map(|(p, _)| p), Some(Px(MID.0 - 2)));
     }
 
-    /// The dispatch matches the three Phase 4 impls and rejects unknown names.
+    /// The dispatch matches the four impls and rejects unknown names.
     #[test]
     #[should_panic(expected = "unknown impl")]
     fn run_impl_rejects_unknown() {
@@ -336,6 +337,6 @@ mod tests {
             samples: 1,
             warmup: 0,
         };
-        let _ = run_impl("flat", &ctx);
+        let _ = run_impl("nope", &ctx);
     }
 }

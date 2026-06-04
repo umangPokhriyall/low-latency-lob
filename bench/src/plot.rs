@@ -16,9 +16,10 @@ use std::path::{Path, PathBuf};
 /// One impl's plotting identity: registry tag and a stable line colour.
 fn impl_color(name: &str) -> RGBColor {
     match name {
-        "btree" => RGBColor(200, 30, 30),  // red
-        "sorted" => RGBColor(30, 80, 200), // blue
-        "rev" => RGBColor(30, 150, 60),    // green
+        "btree" => RGBColor(200, 30, 30),   // red
+        "sorted" => RGBColor(30, 80, 200),  // blue
+        "rev" => RGBColor(30, 150, 60),     // green
+        "flat" => RGBColor(220, 130, 0),    // orange (Phase 5 FlatBook)
         _ => BLACK,
     }
 }

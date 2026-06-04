@@ -20,7 +20,7 @@ use crate::clock::BenchClock;
 use crate::harness;
 use crate::recorder::Recorder;
 use crate::workload::{Locality, build_at_depth, gap_price, touch_price};
-use book::{BTreeBook, BookEvent, OrderBook, Px, Qty, RevVecBook, Side, SortedVecBook};
+use book::{BTreeBook, BookEvent, FlatBook, OrderBook, Px, Qty, RevVecBook, Side, SortedVecBook};
 use feed::rng::SplitMix64;
 use std::hint::black_box;
 use std::path::{Path, PathBuf};
@@ -181,14 +181,15 @@ fn sweep_cell<B: OrderBook>(ctx: &Ctx<'_>, seed: u64) -> CellResult {
     CellResult { update, insert, remove, trade }
 }
 
-/// The monomorphized impl dispatch (no `dyn OrderBook`). Phase 5 adds `"flat"`.
-/// The name is validated against the registry first, then matched to a concrete
-/// type — each arm instantiates a fresh `sweep_cell::<Concrete>` so `apply` inlines.
+/// The monomorphized impl dispatch (no `dyn OrderBook`). The name is validated
+/// against the registry first, then matched to a concrete type — each arm
+/// instantiates a fresh `sweep_cell::<Concrete>` so `apply` inlines.
 fn run_impl(name: &str, ctx: &Ctx<'_>, seed: u64) -> CellResult {
     match harness::for_impl(name) {
         Some("btree") => sweep_cell::<BTreeBook>(ctx, seed),
         Some("sorted") => sweep_cell::<SortedVecBook>(ctx, seed),
         Some("rev") => sweep_cell::<RevVecBook>(ctx, seed),
+        Some("flat") => sweep_cell::<FlatBook>(ctx, seed),
         _ => panic!("unknown impl `{name}` (expected one of {:?})", harness::IMPLS),
     }
 }
@@ -520,7 +521,7 @@ mod tests {
         );
     }
 
-    /// The dispatch matches the three Phase 4 impls and rejects unknown names.
+    /// The dispatch matches the four impls and rejects unknown names.
     #[test]
     #[should_panic(expected = "unknown impl")]
     fn run_impl_rejects_unknown() {
@@ -533,6 +534,6 @@ mod tests {
             samples: 1,
             warmup: 0,
         };
-        let _ = run_impl("flat", &ctx, 0);
+        let _ = run_impl("nope", &ctx, 0);
     }
 }

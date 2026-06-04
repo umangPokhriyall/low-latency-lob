@@ -24,7 +24,7 @@
 use crate::clock::BenchClock;
 use crate::harness;
 use crate::recorder::Recorder;
-use book::{BTreeBook, BookEvent, OrderBook, RevVecBook, SortedVecBook};
+use book::{BTreeBook, BookEvent, FlatBook, OrderBook, RevVecBook, SortedVecBook};
 use feed::corpus::Corpus;
 use std::hint::black_box;
 use std::path::{Path, PathBuf};
@@ -132,12 +132,13 @@ fn co_run<B: OrderBook>(clock: &BenchClock, events: &[BookEvent], sched: Schedul
     RunResult { rec, achieved_rate_eps, samples }
 }
 
-/// Monomorphized impl dispatch (no `dyn`). Phase 5 adds `"flat"`.
+/// Monomorphized impl dispatch (no `dyn`).
 fn run_impl(name: &str, clock: &BenchClock, events: &[BookEvent], sched: Schedule) -> RunResult {
     match harness::for_impl(name) {
         Some("btree") => co_run::<BTreeBook>(clock, events, sched),
         Some("sorted") => co_run::<SortedVecBook>(clock, events, sched),
         Some("rev") => co_run::<RevVecBook>(clock, events, sched),
+        Some("flat") => co_run::<FlatBook>(clock, events, sched),
         _ => panic!("unknown impl `{name}` (expected one of {:?})", harness::IMPLS),
     }
 }
@@ -594,6 +595,6 @@ mod tests {
     fn run_impl_rejects_unknown() {
         let clock = BenchClock::new();
         let corpus = small_corpus();
-        let _ = run_impl("flat", &clock, corpus.events(), Schedule::FixedRate(1_000_000));
+        let _ = run_impl("nope", &clock, corpus.events(), Schedule::FixedRate(1_000_000));
     }
 }
