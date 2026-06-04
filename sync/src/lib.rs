@@ -6,5 +6,7 @@
 //! unsafe scope — see the `unsafe_op_in_unsafe_fn` lint below.
 #![deny(unsafe_op_in_unsafe_fn)]
 
+pub mod ring;
 pub mod seqlock;
+pub use ring::{Consumer, Producer, Recv, RingHandle, SpmcRing};
 pub use seqlock::{SeqLock, TopOfBook};

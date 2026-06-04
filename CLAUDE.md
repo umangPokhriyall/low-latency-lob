@@ -64,23 +64,28 @@ host-specific; the benchmark host is documented in the README.
 - docs/specs/phase3-spec.md    — feed: corpus, replay, synthetic, recorder
 - docs/specs/phase4-spec.md    — bench harness, depth sweep, CO-correct study, crossover
 - docs/specs/phase5-spec.md    — FlatBook, four-way oracle, final verdict
-- docs/specs/phase6-spec.md    — CURRENT: sync seqlock (memory ordering, loom, stress, contention)
+- docs/specs/phase6-spec.md    — sync seqlock (memory ordering, loom, stress, contention)
+- docs/specs/phase7-spec.md    — CURRENT: sync SPMC broadcast ring (ordering, loom, stress, false-sharing bench)
 
 ## Hard rules
-1. book is FROZEN/done. sync gains the seqlock; bench gains one benchmark (consumes sync).
-2. SEQLOCK is SOUND with NO unsafe: payload fields are atomics accessed Relaxed,
-   the version counter (Acquire/Release) carries ordering, torn snapshots are
-   detected by the seq check and discarded. The generic UnsafeCell<T> seqlock is a
-   DATA RACE (UB) in Rust's model — rejected. unsafe budget is for Phase 7's ring.
-3. Memory ordering is ARGUED in comments (each Acquire/Release/fence named) and
-   VERIFIED by loom (#[cfg(loom)], consistency-witness model) AND corroborated by a
-   real-thread stress test (zero torn reads over millions of iterations).
-4. Progress guarantees stated honestly: writer wait-free; readers NOT lock-free
-   (starvable). No "lock-free" overclaim.
-5. sync runtime deps: none (std atomics; #[repr(align(64))] hand-rolled). loom is a
-   DEV-dependency only. sync keeps #![deny(unsafe_op_in_unsafe_fn)] (not forbid).
-6. Contention numbers obey the Phase 4 methodology (recorded clock floor, pinning,
-   warmup, black_box); writer-independence shown with numbers. seqlock.md is interim.
+1. book frozen/done; feed done. Phase 7 touches only sync (the ring) + bench (one benchmark).
+2. The SPMC ring is a BROADCAST bus: single producer (wait-free, overwrites on wrap,
+   never blocks), many INDEPENDENT consumers (own cursor, read the whole stream).
+   Lossy overwrite + OVERRUN DETECTION (never silent loss); no torn item returned.
+3. SOUND with NO unsafe: payload is atomic words ([AtomicU64; W]) read/written Relaxed,
+   ordered by a per-slot stamp (Vyukov-style position + WRITING bit; seqlock double-check).
+   UnsafeCell+ptr broadcast copy is a DATA RACE (UB) — rejected. Producer-gating is sound
+   but BLOCKS the writer — rejected. Vyukov's UnsafeCell is sound only for single-consume
+   QUEUES (exclusive slots), not broadcast.
+4. #[repr(align(64))] slots + isolated WritePos (no false sharing); proven by static
+   size assert AND a flat producer-throughput-vs-K benchmark.
+5. Ordering ARGUED in comments (each Acquire/Release/fence named) and VERIFIED by loom
+   (position-witness, yield_now under cfg(loom), documented preemption bound) AND
+   corroborated by real-thread stress (no-loss, overrun-detection, no-tear/dup).
+6. Writer wait-free; consumers NOT lock-free. No overclaim.
+7. ZERO-unsafe capstone: the WHOLE workspace contains no unsafe (both lock-free
+   primitives are sound atomic constructions). Optionally forbid(unsafe_code) in sync.
+8. sync runtime deps: none; loom dev-only. Bench obeys Phase 4 methodology; ring.md interim.
 
 ## Scope discipline
 Work ONLY on the given session. End green (build + clippy -D warnings + test; the
