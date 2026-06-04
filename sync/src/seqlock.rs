@@ -125,6 +125,18 @@ impl SeqLock {
     /// Many-reader load. Returns a snapshot from a single consistent write.
     #[must_use]
     pub fn load(&self) -> TopOfBook {
+        self.load_counted().0
+    }
+
+    /// Like [`load`](SeqLock::load), but also returns how many times the optimistic
+    /// snapshot had to be retried (an odd `seq`, or a write that straddled the
+    /// read). Zero in the uncontended case. Used by the stress test and the
+    /// contention benchmark to quantify retries under write pressure; the retry
+    /// counter is a local incremented only on the (rare) retry path, so the common
+    /// path is identical to [`load`](SeqLock::load). The ordering proof lives here.
+    #[must_use]
+    pub fn load_counted(&self) -> (TopOfBook, u32) {
+        let mut retries = 0u32;
         loop {
             let s1 = self.seq.load(Acquire); // (R1) Acquire: pairs with (W2); see that write's payload
             if s1 & 1 == 0 {
@@ -142,7 +154,7 @@ impl SeqLock {
                 let s2 = self.seq.load(Relaxed);
                 if s1 == s2 {
                     // even and unchanged => no write straddled the read
-                    return t;
+                    return (t, retries);
                 }
                 // else: a write straddled the read => the snapshot may be torn; fall
                 // through to retry.
@@ -152,6 +164,7 @@ impl SeqLock {
             // through this single yield point, which is what bounds the loom model
             // (the spin is a yield so loom switches to the writer instead of
             // exploring the reader spinning in place) and backs off a real CPU.
+            retries = retries.saturating_add(1);
             spin_loop();
         }
     }
