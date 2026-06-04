@@ -50,6 +50,14 @@ impl Recorder {
         self.hist.len()
     }
 
+    /// Fold another recorder's samples into this one. Used to merge the K
+    /// per-reader histograms of one contention cell into a single read-latency
+    /// distribution (Benchmark 5, §6). Auto-resizing is off, but both recorders
+    /// share identical bounds, so the add never loses samples.
+    pub fn merge(&mut self, other: &Recorder) {
+        self.hist.add(&other.hist).expect("recorders share identical bounds");
+    }
+
     /// Export the full percentile distribution in the standard `HdrHistogram`
     /// `.hgrm` text layout (`Value` / `Percentile` / `TotalCount` /
     /// `1/(1-Percentile)`), the input the §9 interior-latency (log-y) plot consumes.

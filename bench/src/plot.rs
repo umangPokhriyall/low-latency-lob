@@ -218,6 +218,60 @@ fn interior_figure(out_dir: &Path, results: &Path, locality: &str, depth: u32) {
     }
 }
 
+/// Seqlock read p99 vs reader count `K`, one line per writer mode — the
+/// contention story (Benchmark 5 §6). `seqlock_read.csv` columns are, in order:
+/// `readers, writer_mode, samples, clock_overhead_ns, read_p50_ns, read_p99_ns,
+/// read_p999_ns, read_max_ns, mean_retries_per_load, write_p50_ns, write_p99_ns`.
+fn seqlock_read_figure(out_dir: &Path, rows: &[Vec<String>]) {
+    let series = seqlock_series_by_mode(rows, 5); // col 5 = read_p99_ns
+    let out = out_dir.join("seqlock_read_p99_vs_readers.svg");
+    if let Err(e) = render(&out, "seqlock read p99 vs reader count", "seqlock_read.csv", "reader threads K (log)", "read p99 latency (ns, log)", true, &series) {
+        eprintln!("warn: seqlock read figure: {e}");
+    }
+}
+
+/// Seqlock writer `store` p50 and p99 vs reader count `K` — the writer-independence
+/// result (expected FLAT: readers do not tax the wait-free writer). Plotted
+/// full-tilt only (worst case); linear y so flatness is read directly.
+fn seqlock_write_figure(out_dir: &Path, rows: &[Vec<String>]) {
+    let mut p50: Vec<(f64, f64)> = Vec::new();
+    let mut p99: Vec<(f64, f64)> = Vec::new();
+    for r in rows.iter().filter(|r| r.len() > 10 && r[1] == "full_tilt") {
+        if let Ok(k) = r[0].parse::<f64>() {
+            if let Ok(v) = r[9].parse::<f64>() {
+                p50.push((k, v));
+            }
+            if let Ok(v) = r[10].parse::<f64>() {
+                p99.push((k, v));
+            }
+        }
+    }
+    p50.sort_by(|a, b| a.0.total_cmp(&b.0));
+    p99.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let series: Vec<Series> =
+        vec![("store p50", RGBColor(30, 80, 200), p50), ("store p99", RGBColor(200, 30, 30), p99)];
+    let out = out_dir.join("seqlock_write_vs_readers.svg");
+    if let Err(e) = render(&out, "seqlock writer store latency vs reader count (full_tilt)", "seqlock_read.csv", "reader threads K (log)", "store latency (ns)", false, &series) {
+        eprintln!("warn: seqlock write figure: {e}");
+    }
+}
+
+/// Build one series per writer mode from a numeric column of `seqlock_read.csv`.
+fn seqlock_series_by_mode(rows: &[Vec<String>], col: usize) -> Vec<Series> {
+    [("full_tilt", RGBColor(200, 30, 30)), ("paced", RGBColor(30, 150, 60))]
+        .into_iter()
+        .map(|(mode, color)| {
+            let mut pts: Vec<(f64, f64)> = rows
+                .iter()
+                .filter(|r| r.len() > col && r[1] == mode)
+                .filter_map(|r| Some((r[0].parse::<f64>().ok()?, r[col].parse::<f64>().ok()?)))
+                .collect();
+            pts.sort_by(|a, b| a.0.total_cmp(&b.0));
+            (mode, color, pts)
+        })
+        .collect()
+}
+
 /// Parse an `.hgrm`: rows of `value percentile count 1/(1-pct)`; x=col 3, y=col 0.
 /// Skips the header, the trailing `#[..]` summary lines, and the `inf` tail row.
 fn parse_hgrm(path: &Path) -> Vec<(f64, f64)> {
@@ -273,6 +327,11 @@ pub fn run(args: &[String]) {
     for profile in ["steady", "burst", "flashcrash"] {
         sustained_figure(&plots, &sustained, profile);
     }
+
+    // Benchmark 5 (Phase 6): seqlock read p99 vs K, and the writer-independence figure.
+    let seqlock = load_rows(&results.join("seqlock_read.csv"));
+    seqlock_read_figure(&plots, &seqlock);
+    seqlock_write_figure(&plots, &seqlock);
 
     eprintln!("plots in {}", plots.display());
 }

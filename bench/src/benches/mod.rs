@@ -3,6 +3,7 @@
 
 pub mod flat_memory;
 pub mod read;
+pub mod seqlock;
 pub mod service;
 pub mod sustained;
 pub mod throughput;
