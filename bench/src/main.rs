@@ -19,10 +19,20 @@ fn main() {
 
     match cmd {
         // Benchmark 1 — service-time depth sweep (the crossover). Session 1.
-        // `all` will chain every benchmark; today only `service` exists.
-        "service" | "all" => benches::service::run(rest),
+        "service" => benches::service::run(rest),
+        // Benchmark 2 — read-path cost vs depth. Session 2.
+        "read" => benches::read::run(rest),
+        // Benchmark 4 — end-to-end replay throughput. Session 2.
+        "throughput" => benches::throughput::run(rest),
+        // `all` chains every implemented benchmark (service + read + throughput
+        // today; the CO-correct sustained study and plots land in later sessions).
+        "all" => {
+            benches::service::run(rest);
+            benches::read::run(rest);
+            benches::throughput::run(rest);
+        }
         // Implemented in later Phase 4 sessions (see docs/specs/phase4-spec.md).
-        "read" | "sustained" | "throughput" | "plot" => {
+        "sustained" | "plot" => {
             eprintln!("`{cmd}` lands in a later Phase 4 session; not yet implemented");
             std::process::exit(2);
         }
