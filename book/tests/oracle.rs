@@ -3,9 +3,14 @@
 //! This is an INTEGRATION test: it exercises only `book`'s public API, so it
 //! validates the `OrderBook` contract at exactly the surface a consumer sees.
 //! The contract it enforces (§6.1): for ANY sequence of `BookEvent`s, `BTreeBook`,
-//! `SortedVecBook`, and `RevVecBook` produce IDENTICAL observable state after
-//! every event. Internal representation may differ; observable behaviour may not.
-//! A divergence is a correctness bug in at least one impl and BLOCKS the freeze.
+//! `SortedVecBook`, `RevVecBook`, and `FlatBook` produce IDENTICAL observable
+//! state after every event. Internal representation may differ; observable
+//! behaviour may not. A divergence is a correctness bug in at least one impl.
+//!
+//! `FlatBook` (Phase 5) joins every BOUNDED-band test via a four-way `assert_agree`.
+//! The flat array is applicable to bounded price ranges only (phase5-spec §2.6),
+//! so the extreme-`i64` test stays a three-impl check and a dedicated
+//! `flatbook_domain` test covers rebase + the out-of-domain (`MAX_SPAN`) contract.
 //!
 //! Every failure prints `seed` + event index + the diverging field, so any failure
 //! reproduces from a single line. No wall-clock, no threads, no unseeded randomness:
@@ -13,7 +18,9 @@
 
 mod common;
 
-use book::{BTreeBook, BookEvent, OrderBook, Px, Qty, RevVecBook, Side, SortedVecBook};
+use book::{
+    BTreeBook, BookEvent, FlatBook, OrderBook, Px, Qty, RevVecBook, Side, SortedVecBook,
+};
 
 // ---------------------------------------------------------------------------
 // 6.2 The observable snapshot
@@ -115,16 +122,46 @@ fn gen_event(rng: &mut SplitMix64, seq: u64) -> BookEvent {
 // 6.5 Agreement assertion + driving helpers
 // ---------------------------------------------------------------------------
 
-fn assert_agree(seed: u64, k: u64, a: &BTreeBook, b: &SortedVecBook, c: &RevVecBook) {
+/// Four-way agreement on the BOUNDED band: `BTreeBook` vs each of the other three.
+/// The generator band (`PRICE_BASE ± PRICE_BAND` = 10000 ± 64) is well inside
+/// `FlatBook`'s domain, so this is a direct four-way equality check.
+#[allow(clippy::many_single_char_names)] // a/b/c/d mirror the impl-per-letter oracle style
+fn assert_agree(seed: u64, k: u64, a: &BTreeBook, b: &SortedVecBook, c: &RevVecBook, d: &FlatBook) {
+    let (oa, ob, oc, od) = (observe(a), observe(b), observe(c), observe(d));
+    assert_eq!(oa, ob, "BTree vs SortedVec diverged at seed={seed} k={k}");
+    assert_eq!(oa, oc, "BTree vs RevVec   diverged at seed={seed} k={k}");
+    assert_eq!(oa, od, "BTree vs FlatBook diverged at seed={seed} k={k}");
+}
+
+/// Three-way agreement (BTree/Sorted/Rev) for the unbounded extreme-`i64` test,
+/// which is out of `FlatBook`'s bounded domain by design (phase5-spec §2.6).
+fn assert_agree_three(seed: u64, k: u64, a: &BTreeBook, b: &SortedVecBook, c: &RevVecBook) {
     let (oa, ob, oc) = (observe(a), observe(b), observe(c));
     assert_eq!(oa, ob, "BTree vs SortedVec diverged at seed={seed} k={k}");
     assert_eq!(oa, oc, "BTree vs RevVec   diverged at seed={seed} k={k}");
 }
 
-/// Drive all three impls through `events`, asserting full agreement after EVERY
+/// Drive all four impls through `events`, asserting full agreement after EVERY
 /// event. `tag` identifies the scenario in any failure message. Used by every
-/// non-random test, where exhaustive per-event checking is cheap.
+/// bounded-band non-random test, where exhaustive per-event checking is cheap.
+#[allow(clippy::many_single_char_names)] // a/b/c/d mirror the impl-per-letter oracle style
 fn drive_and_check(tag: u64, events: &[BookEvent]) {
+    let mut a = BTreeBook::default();
+    let mut b = SortedVecBook::default();
+    let mut c = RevVecBook::default();
+    let mut d = FlatBook::default();
+    for (k, ev) in events.iter().enumerate() {
+        a.apply(ev);
+        b.apply(ev);
+        c.apply(ev);
+        d.apply(ev);
+        assert_agree(tag, k as u64, &a, &b, &c, &d);
+    }
+}
+
+/// Drive the three unbounded-domain impls (no `FlatBook`) through `events`.
+/// Used only by the extreme-`i64` test.
+fn drive_and_check_three(tag: u64, events: &[BookEvent]) {
     let mut a = BTreeBook::default();
     let mut b = SortedVecBook::default();
     let mut c = RevVecBook::default();
@@ -132,7 +169,7 @@ fn drive_and_check(tag: u64, events: &[BookEvent]) {
         a.apply(ev);
         b.apply(ev);
         c.apply(ev);
-        assert_agree(tag, k as u64, &a, &b, &c);
+        assert_agree_three(tag, k as u64, &a, &b, &c);
     }
 }
 
@@ -150,6 +187,7 @@ fn oracle_shared_scenario() {
 //    full ladder agreement every 64 events and at the end. On failure the printed
 //    seed + index reproduce it exactly. `BOOK_ORACLE_ITERS` overrides the count.
 #[test]
+#[allow(clippy::many_single_char_names)] // a/b/c/d mirror the impl-per-letter oracle style
 fn oracle_randomized() {
     const SEEDS: [u64; 8] = [1, 2, 3, 5, 8, 13, 21, 0xDEAD_BEEF];
     let iters: u64 = std::env::var("BOOK_ORACLE_ITERS")
@@ -162,27 +200,32 @@ fn oracle_randomized() {
         let mut a = BTreeBook::default();
         let mut b = SortedVecBook::default();
         let mut c = RevVecBook::default();
+        let mut d = FlatBook::default();
         for k in 0..iters {
             let ev = gen_event(&mut rng, k);
             a.apply(&ev);
             b.apply(&ev);
             c.apply(&ev);
+            d.apply(&ev);
             // Cheap per-event check on the hot read path.
             assert_eq!(a.best_bid(), b.best_bid(), "best_bid BTree/Sorted seed={seed} k={k}");
             assert_eq!(a.best_bid(), c.best_bid(), "best_bid BTree/Rev    seed={seed} k={k}");
+            assert_eq!(a.best_bid(), d.best_bid(), "best_bid BTree/Flat   seed={seed} k={k}");
             assert_eq!(a.best_ask(), b.best_ask(), "best_ask BTree/Sorted seed={seed} k={k}");
             assert_eq!(a.best_ask(), c.best_ask(), "best_ask BTree/Rev    seed={seed} k={k}");
+            assert_eq!(a.best_ask(), d.best_ask(), "best_ask BTree/Flat   seed={seed} k={k}");
             // Full ladder agreement periodically (exhaustive every-event would be slow).
             if k.is_multiple_of(64) {
-                assert_agree(seed, k, &a, &b, &c);
+                assert_agree(seed, k, &a, &b, &c, &d);
             }
         }
-        assert_agree(seed, iters, &a, &b, &c);
+        assert_agree(seed, iters, &a, &b, &c, &d);
     }
 }
 
 // 3. Negative and extreme prices on both sides: ordering must be integer-correct
-//    across the whole i64 range.
+//    across the whole i64 range. THREE-IMPL: `i64::MIN+1 .. i64::MAX-1` exceeds
+//    any flat array, so `FlatBook` is out of domain here by design (§2.6).
 #[test]
 fn oracle_negative_and_extreme_prices() {
     let prices = [Px(-5), Px(0), Px(i64::MAX - 1), Px(i64::MIN + 1)];
@@ -198,7 +241,7 @@ fn oracle_negative_and_extreme_prices() {
     events.push(BookEvent::level(seq, seq, Side::Bid, Px(i64::MIN + 1), Qty(0)));
     seq += 1;
     events.push(BookEvent::level(seq, seq, Side::Ask, Px(i64::MAX - 1), Qty(0)));
-    drive_and_check(3, &events);
+    drive_and_check_three(3, &events);
 }
 
 // 4. Crossed book: bids driven above asks. A transient crossing is legal for a
@@ -278,4 +321,76 @@ fn oracle_realloc_churn() {
         seq += 1;
     }
     drive_and_check(7, &events);
+}
+
+// ---------------------------------------------------------------------------
+// FlatBook domain tests (phase5-spec §4.3): rebase correctness + the
+// out-of-domain (MAX_SPAN) contract. These exercise behaviour the bounded
+// generator band never reaches.
+// ---------------------------------------------------------------------------
+
+/// Mirrors the private `INIT_HALF_SPAN` in `book/src/flat.rs` (half-span the
+/// flat array pre-allocates around the first observed price). Crossing it in
+/// both directions drives a front-recenter and a back-grow.
+const FLAT_INIT_HALF_SPAN: i64 = 4096;
+
+// 8. Rebase correctness: a sequence that deliberately crosses the initial
+//    half-span in BOTH directions (a level above `mid + INIT_HALF_SPAN` forces a
+//    back-grow; one below `mid - INIT_HALF_SPAN` forces a front-recenter).
+//    `FlatBook` must agree with `BTreeBook` on the full observable ladder
+//    throughout — proving the base/best-index shift on recenter is correct.
+#[test]
+fn flatbook_domain_rebase() {
+    let mid: i64 = 1_000_000;
+    let mut events = Vec::new();
+    let mut seq = 0u64;
+
+    // Seed near `mid` so the array initializes centered there.
+    events.push(BookEvent::level(seq, seq, Side::Bid, Px(mid), Qty(5)));
+    seq += 1;
+    events.push(BookEvent::level(seq, seq, Side::Ask, Px(mid + 1), Qty(7)));
+    seq += 1;
+
+    // Back-grow: asks beyond `mid + INIT_HALF_SPAN`.
+    for k in 0..8 {
+        let px = Px(mid + FLAT_INIT_HALF_SPAN + 1 + k * 50);
+        events.push(BookEvent::level(seq, seq, Side::Ask, px, Qty(k + 2)));
+        seq += 1;
+    }
+    // Front-recenter: bids below `mid - INIT_HALF_SPAN`.
+    for k in 0..8 {
+        let px = Px(mid - FLAT_INIT_HALF_SPAN - 1 - k * 50);
+        events.push(BookEvent::level(seq, seq, Side::Bid, px, Qty(k + 3)));
+        seq += 1;
+    }
+    // Remove the current bests to force the post-recenter probe to fire.
+    events.push(BookEvent::level(seq, seq, Side::Bid, Px(mid), Qty(0)));
+    seq += 1;
+    events.push(BookEvent::level(seq, seq, Side::Ask, Px(mid + 1), Qty(0)));
+
+    // Drive BTree (oracle truth) and FlatBook in lockstep; full-ladder agreement
+    // after every event, across both grows and the probe.
+    let mut a = BTreeBook::default();
+    let mut d = FlatBook::default();
+    for (k, ev) in events.iter().enumerate() {
+        a.apply(ev);
+        d.apply(ev);
+        assert_eq!(
+            observe(&a),
+            observe(&d),
+            "BTree vs FlatBook diverged during rebase at k={k}"
+        );
+    }
+}
+
+// 9. Out-of-domain contract: a level whose span would exceed `MAX_SPAN` panics
+//    with the documented message. `MAX_SPAN` is 8M ticks; init near 0 then a
+//    level ~9M ticks away forces a grow past the cap.
+#[test]
+#[should_panic(expected = "FlatBook span exceeds MAX_SPAN")]
+fn flatbook_domain_over_cap_panics() {
+    let mut d = FlatBook::default();
+    d.apply(&BookEvent::level(1, 1, Side::Bid, Px(0), Qty(1)));
+    // 9_000_000 > MAX_SPAN (8_388_608): the required span exceeds the cap.
+    d.apply(&BookEvent::level(2, 2, Side::Ask, Px(9_000_000), Qty(1)));
 }

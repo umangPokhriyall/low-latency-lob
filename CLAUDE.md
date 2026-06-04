@@ -62,23 +62,25 @@ host-specific; the benchmark host is documented in the README.
 - docs/specs/phase1-spec.md    — event model, OrderBook trait, BTreeBook
 - docs/specs/phase2-spec.md    — Vec impls, differential oracle, FREEZE (book-v1-frozen)
 - docs/specs/phase3-spec.md    — feed: corpus, replay, synthetic, recorder
-- docs/specs/phase4-spec.md    — CURRENT: bench harness, depth sweep, CO-correct study, crossover
+- docs/specs/phase4-spec.md    — bench harness, depth sweep, CO-correct study, crossover
+- docs/specs/phase5-spec.md    — CURRENT: FlatBook, 4-way oracle, re-run, final verdict
 
 ## Hard rules
-1. book + feed are FROZEN/done. All Phase 4 code lives in bench/. Drive impls by
-   monomorphization (run::<ConcreteBook>) — NEVER dyn OrderBook in a measured loop.
-2. MEASURE-NEVER-GUESS, operationalized:
-   - black_box every measured op's inputs AND outputs (defeat elision).
-   - Measure and RECORD clock overhead; never silently subtract it.
-   - Pin the thread; warm up untimed; record the CPU governor. >=1M samples/cell.
-   - Coordinated omission: response latency = completion - SCHEDULED arrival,
-     never completion - apply_start. Service-time benches have no arrival process
-     and must say so. Do not blur service time and response time.
-3. bench deps: hdrhistogram, quanta, core_affinity, plotters. NO tokio (feed is
-   used at default features). bench stays #![forbid(unsafe_code)].
-4. Numbers are committed to bench/results/ as CSV (source of truth) + .hgrm + SVG +
-   env.json. Plots cite their CSV. RESULTS.md is built ONLY from committed CSVs —
-   invent nothing; this is interim (3 impls), not the Phase 10 BENCHMARKS.md.
+1. book is FROZEN. Phase 5 makes ONLY the carved-out additive edits: new
+   book/src/flat.rs, +2 lines in lib.rs (mod flat; pub use flat::FlatBook;),
+   extend book/tests/oracle.rs to 4-way + FlatBook domain test, update FROZEN.md.
+   The six frozen-logic files stay byte-identical to book-v1-frozen (diff empty).
+2. FlatBook is the flat price-tick array: O(1) direct-index update, cached best
+   with removal probe, recenter on out-of-range, MAX_SPAN panic. BOUNDED ranges
+   only — that tradeoff is documented, not hidden. #![forbid(unsafe_code)] holds.
+3. Oracle: 4-way on the bounded band; the extreme-i64 test stays 3-impl (FlatBook
+   out of domain by design); add flatbook_domain (rebase + should_panic over cap).
+4. bench (not frozen): wire "flat" into every benchmark by monomorphization (no
+   dyn). Re-run Phase 4 methodology unchanged; regenerate all CSVs/.hgrm/plots/
+   env.json + flat_memory.csv with 4-impl data.
+5. RESULTS.md becomes the FINAL 4-impl verdict, built ONLY from committed CSVs:
+   the real-data inversion explained + resolved, the flat tradeoff quantified, a
+   sourced which-structure-when matrix, H1-H5 outcomes. Not the Phase 10 writeup.
 
 ## Scope discipline
 Work ONLY on the given session. End green (build + clippy -D warnings + test),
