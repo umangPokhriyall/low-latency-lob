@@ -5,3 +5,6 @@
 //! carry a `// SAFETY:` justification. `unsafe fn` bodies do not get an implicit
 //! unsafe scope — see the `unsafe_op_in_unsafe_fn` lint below.
 #![deny(unsafe_op_in_unsafe_fn)]
+
+pub mod seqlock;
+pub use seqlock::{SeqLock, TopOfBook};

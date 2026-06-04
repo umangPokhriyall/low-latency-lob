@@ -63,25 +63,25 @@ host-specific; the benchmark host is documented in the README.
 - docs/specs/phase2-spec.md    — Vec impls, differential oracle, FREEZE (book-v1-frozen)
 - docs/specs/phase3-spec.md    — feed: corpus, replay, synthetic, recorder
 - docs/specs/phase4-spec.md    — bench harness, depth sweep, CO-correct study, crossover
-- docs/specs/phase5-spec.md    — CURRENT: FlatBook, 4-way oracle, re-run, final verdict
+- docs/specs/phase5-spec.md    — FlatBook, four-way oracle, final verdict
+- docs/specs/phase6-spec.md    — CURRENT: sync seqlock (memory ordering, loom, stress, contention)
 
 ## Hard rules
-1. book is FROZEN. Phase 5 makes ONLY the carved-out additive edits: new
-   book/src/flat.rs, +2 lines in lib.rs (mod flat; pub use flat::FlatBook;),
-   extend book/tests/oracle.rs to 4-way + FlatBook domain test, update FROZEN.md.
-   The six frozen-logic files stay byte-identical to book-v1-frozen (diff empty).
-2. FlatBook is the flat price-tick array: O(1) direct-index update, cached best
-   with removal probe, recenter on out-of-range, MAX_SPAN panic. BOUNDED ranges
-   only — that tradeoff is documented, not hidden. #![forbid(unsafe_code)] holds.
-3. Oracle: 4-way on the bounded band; the extreme-i64 test stays 3-impl (FlatBook
-   out of domain by design); add flatbook_domain (rebase + should_panic over cap).
-4. bench (not frozen): wire "flat" into every benchmark by monomorphization (no
-   dyn). Re-run Phase 4 methodology unchanged; regenerate all CSVs/.hgrm/plots/
-   env.json + flat_memory.csv with 4-impl data.
-5. RESULTS.md becomes the FINAL 4-impl verdict, built ONLY from committed CSVs:
-   the real-data inversion explained + resolved, the flat tradeoff quantified, a
-   sourced which-structure-when matrix, H1-H5 outcomes. Not the Phase 10 writeup.
+1. book is FROZEN/done. sync gains the seqlock; bench gains one benchmark (consumes sync).
+2. SEQLOCK is SOUND with NO unsafe: payload fields are atomics accessed Relaxed,
+   the version counter (Acquire/Release) carries ordering, torn snapshots are
+   detected by the seq check and discarded. The generic UnsafeCell<T> seqlock is a
+   DATA RACE (UB) in Rust's model — rejected. unsafe budget is for Phase 7's ring.
+3. Memory ordering is ARGUED in comments (each Acquire/Release/fence named) and
+   VERIFIED by loom (#[cfg(loom)], consistency-witness model) AND corroborated by a
+   real-thread stress test (zero torn reads over millions of iterations).
+4. Progress guarantees stated honestly: writer wait-free; readers NOT lock-free
+   (starvable). No "lock-free" overclaim.
+5. sync runtime deps: none (std atomics; #[repr(align(64))] hand-rolled). loom is a
+   DEV-dependency only. sync keeps #![deny(unsafe_op_in_unsafe_fn)] (not forbid).
+6. Contention numbers obey the Phase 4 methodology (recorded clock floor, pinning,
+   warmup, black_box); writer-independence shown with numbers. seqlock.md is interim.
 
 ## Scope discipline
-Work ONLY on the given session. End green (build + clippy -D warnings + test),
-commit, list changes + headline numbers, STOP.
+Work ONLY on the given session. End green (build + clippy -D warnings + test; the
+loom session also runs --cfg loom green), commit, list changes + headline numbers, STOP.

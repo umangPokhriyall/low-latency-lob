@@ -9,3 +9,11 @@ license.workspace      = true
 workspace = true
 
 [dependencies]
+
+# loom is a model-checking dev tool, pulled in ONLY under `--cfg loom` (the
+# seqlock's std/loom atomic switch). Under a normal build it is not a dependency
+# at all, so `cargo tree -p sync` shows no runtime deps. loom's own docs require
+# this cfg-gated form: the LIB references `loom` under cfg(loom), and a plain
+# [dev-dependencies] is not visible to the lib's normal compilation.
+[target.'cfg(loom)'.dependencies]
+loom = "0.7.2"

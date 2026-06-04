@@ -10,6 +10,9 @@ license      = "MIT OR Apache-2.0"
 [workspace.lints.rust]
 missing_debug_implementations = "warn"
 rust_2018_idioms              = "warn"
+# `loom` is a #[cfg(loom)] dev-only model-checking switch in `sync`; register it
+# so the std build does not warn on the unexpected cfg (would fail -D warnings).
+unexpected_cfgs               = { level = "warn", check-cfg = ['cfg(loom)'] }
 
 [workspace.lints.clippy]
 all      = { level = "deny",  priority = -1 }
