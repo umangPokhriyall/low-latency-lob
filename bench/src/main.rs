@@ -9,6 +9,7 @@
 mod benches;
 mod clock;
 mod harness;
+mod plot;
 mod recorder;
 mod workload;
 
@@ -26,18 +27,15 @@ fn main() {
         "throughput" => benches::throughput::run(rest),
         // Benchmark 3 — CO-correct sustained-feed response time. Session 3.
         "sustained" => benches::sustained::run(rest),
-        // `all` chains every implemented benchmark (service + read + throughput +
-        // sustained today; the plots land in the final Phase 4 session).
+        // Render every §9 figure + env.json strictly from the committed CSVs.
+        "plot" => plot::run(rest),
+        // `all` chains every benchmark then renders the plots + env.json last.
         "all" => {
             benches::service::run(rest);
             benches::read::run(rest);
             benches::throughput::run(rest);
             benches::sustained::run(rest);
-        }
-        // Implemented in the final Phase 4 session (see docs/specs/phase4-spec.md).
-        "plot" => {
-            eprintln!("`{cmd}` lands in a later Phase 4 session; not yet implemented");
-            std::process::exit(2);
+            plot::run(rest);
         }
         _ => {
             eprintln!(
