@@ -31,6 +31,8 @@ fn main() {
         "flatmem" => benches::flat_memory::run(rest),
         // Benchmark 5 — seqlock read latency under write contention (Phase 6).
         "seqlock" => benches::seqlock::run(rest),
+        // Benchmark 6 — SPMC ring throughput + false-sharing evidence (Phase 7).
+        "ring" => benches::ring::run(rest),
         // Render every §9 figure + env.json strictly from the committed CSVs.
         "plot" => plot::run(rest),
         // `all` chains every benchmark then renders the plots + env.json last.
@@ -41,11 +43,12 @@ fn main() {
             benches::sustained::run(rest);
             benches::flat_memory::run(rest);
             benches::seqlock::run(rest);
+            benches::ring::run(rest);
             plot::run(rest);
         }
         _ => {
             eprintln!(
-                "usage: bench <service|read|sustained|throughput|flatmem|seqlock|plot|all> \
+                "usage: bench <service|read|sustained|throughput|flatmem|seqlock|ring|plot|all> \
                  [--samples N] [--warmup N] [--core N] [--out DIR]"
             );
             std::process::exit(2);

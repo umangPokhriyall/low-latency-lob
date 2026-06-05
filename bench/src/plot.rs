@@ -256,6 +256,62 @@ fn seqlock_write_figure(out_dir: &Path, rows: &[Vec<String>]) {
     }
 }
 
+/// Ring producer push throughput (Mev/s) vs consumer count `K`, one line per
+/// producer mode — the **false-sharing** figure (expected FLAT in `full_tilt`:
+/// consumers read distinct cache lines, so adding them does not tax the writer).
+/// Linear y so flatness is read directly. `ring_bench.csv` columns are, in order:
+/// `mode, consumers, capacity, words, samples, clock_overhead_ns, push_p50_ns,
+/// push_p99_ns, recv_p50_ns, recv_p99_ns, producer_mev_s, overrun_rate`.
+fn ring_throughput_figure(out_dir: &Path, rows: &[Vec<String>]) {
+    let series = ring_series_by_mode(rows, 10); // col 10 = producer_mev_s
+    let out = out_dir.join("ring_producer_throughput_vs_consumers.svg");
+    if let Err(e) = render(&out, "ring producer push throughput vs consumer count (flat = no false sharing)", "ring_bench.csv", "consumer threads K (log)", "producer throughput (Mev/s)", false, &series) {
+        eprintln!("warn: ring throughput figure: {e}");
+    }
+}
+
+/// Ring `push` and `try_recv` p99 latency vs consumer count `K` (`full_tilt` — worst
+/// case). Two series from `ring_bench.csv`; log y for the ns-scale tail.
+fn ring_latency_figure(out_dir: &Path, rows: &[Vec<String>]) {
+    let mut push: Vec<(f64, f64)> = Vec::new();
+    let mut recv: Vec<(f64, f64)> = Vec::new();
+    for r in rows.iter().filter(|r| r.len() > 9 && r[0] == "full_tilt") {
+        if let Ok(k) = r[1].parse::<f64>() {
+            if let Ok(v) = r[7].parse::<f64>() {
+                push.push((k, v));
+            }
+            if let Ok(v) = r[9].parse::<f64>() {
+                recv.push((k, v));
+            }
+        }
+    }
+    push.sort_by(|a, b| a.0.total_cmp(&b.0));
+    recv.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let series: Vec<Series> =
+        vec![("push p99", RGBColor(200, 30, 30), push), ("recv p99", RGBColor(30, 80, 200), recv)];
+    let out = out_dir.join("ring_latency_p99_vs_consumers.svg");
+    if let Err(e) = render(&out, "ring push/recv p99 latency vs consumer count (full_tilt)", "ring_bench.csv", "consumer threads K (log)", "p99 latency (ns, log)", true, &series) {
+        eprintln!("warn: ring latency figure: {e}");
+    }
+}
+
+/// Build one series per producer mode from a numeric column of `ring_bench.csv`
+/// (x = consumer count, col 1).
+fn ring_series_by_mode(rows: &[Vec<String>], col: usize) -> Vec<Series> {
+    [("full_tilt", RGBColor(200, 30, 30)), ("paced", RGBColor(30, 150, 60))]
+        .into_iter()
+        .map(|(mode, color)| {
+            let mut pts: Vec<(f64, f64)> = rows
+                .iter()
+                .filter(|r| r.len() > col && r[0] == mode)
+                .filter_map(|r| Some((r[1].parse::<f64>().ok()?, r[col].parse::<f64>().ok()?)))
+                .collect();
+            pts.sort_by(|a, b| a.0.total_cmp(&b.0));
+            (mode, color, pts)
+        })
+        .collect()
+}
+
 /// Build one series per writer mode from a numeric column of `seqlock_read.csv`.
 fn seqlock_series_by_mode(rows: &[Vec<String>], col: usize) -> Vec<Series> {
     [("full_tilt", RGBColor(200, 30, 30)), ("paced", RGBColor(30, 150, 60))]
@@ -332,6 +388,12 @@ pub fn run(args: &[String]) {
     let seqlock = load_rows(&results.join("seqlock_read.csv"));
     seqlock_read_figure(&plots, &seqlock);
     seqlock_write_figure(&plots, &seqlock);
+
+    // Benchmark 6 (Phase 7): ring producer throughput vs K (the false-sharing test,
+    // expected flat) and push/recv p99 vs K.
+    let ring = load_rows(&results.join("ring_bench.csv"));
+    ring_throughput_figure(&plots, &ring);
+    ring_latency_figure(&plots, &ring);
 
     eprintln!("plots in {}", plots.display());
 }
