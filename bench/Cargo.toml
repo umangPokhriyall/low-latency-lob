@@ -11,6 +11,7 @@ workspace = true
 [dependencies]
 book = { path = "../book" }
 core_affinity = "0.8.3"
+engine = { path = "../engine" }
 feed = { path = "../feed" }
 hdrhistogram = "7.5.4"
 plotters = { version = "0.3.7", default-features = false, features = ["svg_backend", "line_series"] }

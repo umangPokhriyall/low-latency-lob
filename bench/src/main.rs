@@ -33,6 +33,8 @@ fn main() {
         "seqlock" => benches::seqlock::run(rest),
         // Benchmark 6 — SPMC ring throughput + false-sharing evidence (Phase 7).
         "ring" => benches::ring::run(rest),
+        // Benchmark 7 — end-to-end production-to-consumption latency (Phase 8).
+        "e2e" => benches::e2e::run(rest),
         // Render every §9 figure + env.json strictly from the committed CSVs.
         "plot" => plot::run(rest),
         // `all` chains every benchmark then renders the plots + env.json last.
@@ -44,12 +46,13 @@ fn main() {
             benches::flat_memory::run(rest);
             benches::seqlock::run(rest);
             benches::ring::run(rest);
+            benches::e2e::run(rest);
             plot::run(rest);
         }
         _ => {
             eprintln!(
-                "usage: bench <service|read|sustained|throughput|flatmem|seqlock|ring|plot|all> \
-                 [--samples N] [--warmup N] [--core N] [--out DIR]"
+                "usage: bench <service|read|sustained|throughput|flatmem|seqlock|ring|e2e|plot|all> \
+                 [--samples N] [--warmup N] [--core N] [--speed N] [--no-real] [--out DIR]"
             );
             std::process::exit(2);
         }

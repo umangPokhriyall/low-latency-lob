@@ -295,6 +295,86 @@ fn ring_latency_figure(out_dir: &Path, rows: &[Vec<String>]) {
     }
 }
 
+/// A stable line colour per consumer-count `K` (the e2e figures plot one line per K).
+fn k_color(k: u32) -> RGBColor {
+    match k {
+        1 => RGBColor(200, 30, 30),  // red
+        2 => RGBColor(30, 80, 200),  // blue
+        4 => RGBColor(30, 150, 60),  // green
+        8 => RGBColor(220, 130, 0),  // orange
+        _ => BLACK,
+    }
+}
+
+/// End-to-end (production→consumption) p99 latency vs target rate, one line per
+/// consumer count `K`, for the synthetic fixed-rate schedule — the headline CO-correct
+/// distribution and where the tail blows up at saturation. `e2e.csv` columns are, in
+/// order: `book, schedule, consumers, target_rate_eps, achieved_rate_eps, samples,
+/// clock_overhead_ns, e2e_p50_ns, e2e_p99_ns, e2e_p999_ns, e2e_max_ns, producer_mev_s,
+/// overrun_rate, saturated`.
+fn e2e_p99_vs_rate_figure(out_dir: &Path, rows: &[Vec<String>]) {
+    let series: Vec<Series> = [1u32, 2, 4, 8]
+        .into_iter()
+        .map(|k| {
+            let mut pts: Vec<(f64, f64)> = rows
+                .iter()
+                .filter(|r| r.len() > 8 && r[1] == "fixed" && r[2] == k.to_string())
+                .filter_map(|r| Some((r[3].parse::<f64>().ok()?, r[8].parse::<f64>().ok()?)))
+                .collect();
+            pts.sort_by(|a, b| a.0.total_cmp(&b.0));
+            // Leaked tiny K-label string keeps the `&'static str` Series contract.
+            let label: &'static str = Box::leak(format!("K={k}").into_boxed_str());
+            (label, k_color(k), pts)
+        })
+        .collect();
+    let out = out_dir.join("e2e_p99_vs_rate.svg");
+    if let Err(e) = render(
+        &out,
+        "end-to-end p99 vs target rate (per K, synthetic fixed-rate)",
+        "e2e.csv",
+        "target rate (events/s, log)",
+        "end-to-end p99 (ns, log)",
+        true,
+        &series,
+    ) {
+        eprintln!("warn: e2e p99 figure: {e}");
+    }
+}
+
+/// Producer push throughput (Mev/s) vs consumer count `K` at the saturated
+/// (free-running) synthetic rate — the **true-sharing** curve (expected to DECLINE:
+/// every consumer reads the shared `write.v` cursor; this is true sharing, not false
+/// sharing — the slots are `align(64)`-isolated). For each K the saturated operating
+/// point is the highest swept target rate. Linear y so the decline is read directly.
+fn e2e_producer_throughput_figure(out_dir: &Path, rows: &[Vec<String>]) {
+    let mut pts: Vec<(f64, f64)> = Vec::new();
+    for k in [1u32, 2, 4, 8] {
+        // The full-tilt operating point: the row with the max target rate for this K.
+        let best = rows
+            .iter()
+            .filter(|r| r.len() > 11 && r[1] == "fixed" && r[2] == k.to_string())
+            .filter_map(|r| Some((r[3].parse::<u64>().ok()?, r[11].parse::<f64>().ok()?)))
+            .max_by_key(|&(rate, _)| rate);
+        if let Some((_, mev)) = best {
+            pts.push((f64::from(k), mev));
+        }
+    }
+    pts.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let series: Vec<Series> = vec![("producer Mev/s", RGBColor(200, 30, 30), pts)];
+    let out = out_dir.join("e2e_producer_throughput_vs_consumers.svg");
+    if let Err(e) = render(
+        &out,
+        "producer throughput vs consumer count at saturation (true-sharing decline)",
+        "e2e.csv",
+        "consumer threads K (log)",
+        "producer throughput (Mev/s)",
+        false,
+        &series,
+    ) {
+        eprintln!("warn: e2e producer-throughput figure: {e}");
+    }
+}
+
 /// Build one series per producer mode from a numeric column of `ring_bench.csv`
 /// (x = consumer count, col 1).
 fn ring_series_by_mode(rows: &[Vec<String>], col: usize) -> Vec<Series> {
@@ -394,6 +474,12 @@ pub fn run(args: &[String]) {
     let ring = load_rows(&results.join("ring_bench.csv"));
     ring_throughput_figure(&plots, &ring);
     ring_latency_figure(&plots, &ring);
+
+    // Benchmark 7 (Phase 8): end-to-end p99 vs rate (per K) and the producer-
+    // throughput-vs-K true-sharing curve.
+    let e2e = load_rows(&results.join("e2e.csv"));
+    e2e_p99_vs_rate_figure(&plots, &e2e);
+    e2e_producer_throughput_figure(&plots, &e2e);
 
     eprintln!("plots in {}", plots.display());
 }
