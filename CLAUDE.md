@@ -65,27 +65,25 @@ host-specific; the benchmark host is documented in the README.
 - docs/specs/phase4-spec.md    — bench harness, depth sweep, CO-correct study, crossover
 - docs/specs/phase5-spec.md    — FlatBook, four-way oracle, final verdict
 - docs/specs/phase6-spec.md    — sync seqlock (memory ordering, loom, stress, contention)
-- docs/specs/phase7-spec.md    — CURRENT: sync SPMC broadcast ring (ordering, loom, stress, false-sharing bench)
+- docs/specs/phase7-spec.md    — sync SPMC broadcast ring (ordering, loom, stress, false-sharing bench)
+- docs/specs/phase8-spec.md    — CURRENT: engine end-to-end assembly + production-to-consumption latency
 
 ## Hard rules
-1. book frozen/done; feed done. Phase 7 touches only sync (the ring) + bench (one benchmark).
-2. The SPMC ring is a BROADCAST bus: single producer (wait-free, overwrites on wrap,
-   never blocks), many INDEPENDENT consumers (own cursor, read the whole stream).
-   Lossy overwrite + OVERRUN DETECTION (never silent loss); no torn item returned.
-3. SOUND with NO unsafe: payload is atomic words ([AtomicU64; W]) read/written Relaxed,
-   ordered by a per-slot stamp (Vyukov-style position + WRITING bit; seqlock double-check).
-   UnsafeCell+ptr broadcast copy is a DATA RACE (UB) — rejected. Producer-gating is sound
-   but BLOCKS the writer — rejected. Vyukov's UnsafeCell is sound only for single-consume
-   QUEUES (exclusive slots), not broadcast.
-4. #[repr(align(64))] slots + isolated WritePos (no false sharing); proven by static
-   size assert AND a flat producer-throughput-vs-K benchmark.
-5. Ordering ARGUED in comments (each Acquire/Release/fence named) and VERIFIED by loom
-   (position-witness, yield_now under cfg(loom), documented preemption bound) AND
-   corroborated by real-thread stress (no-loss, overrun-detection, no-tear/dup).
-6. Writer wait-free; consumers NOT lock-free. No overclaim.
-7. ZERO-unsafe capstone: the WHOLE workspace contains no unsafe (both lock-free
-   primitives are sound atomic constructions). Optionally forbid(unsafe_code) in sync.
-8. sync runtime deps: none; loom dev-only. Bench obeys Phase 4 methodology; ring.md interim.
+1. book frozen; sync primitives (seqlock, ring) UNCHANGED; feed unchanged. Phase 8
+   adds the engine crate + one bench benchmark (bench -> engine edge).
+2. The pipeline: feed replay -> book.apply -> seqlock.store(top) -> ring.push(pack(ev))
+   on a pinned producer; pinned independent consumers poll/try_recv, resync from the
+   seqlock on Overrun. engine = logic; bench = threads/pinning/timing.
+3. Engine<B: OrderBook> monomorphized (NO dyn). Headline = BTreeBook (real-data
+   champion) on the real BTCUSDT corpus. engine owns BookEvent<->[u64;5] packing,
+   validated at unpack (no transmute).
+4. #![forbid(unsafe_code)] in engine; workspace zero-unsafe invariant holds.
+5. End-to-end latency is CO-correct: production->consumption vs the SCHEDULED arrival
+   (event.ts = scheduled ns; latency = now - ts), never push time. Phase 4 methodology.
+6. TRUE SHARING on the write cursor (Phase 7) will make producer throughput fall with
+   K. MEASURE and REPORT it, attribute it correctly (true not false sharing). Do NOT
+   modify the verified sync primitives to fix it; document the batched-recv mitigation
+   as a hypothesis for the flagship. e2e.md is interim; record the governor.
 
 ## Scope discipline
 Work ONLY on the given session. End green (build + clippy -D warnings + test; the
