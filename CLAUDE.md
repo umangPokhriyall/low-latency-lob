@@ -67,31 +67,29 @@ host-specific; the benchmark host is documented in the README.
 - docs/specs/phase6-spec.md    — sync seqlock (memory ordering, loom, stress, contention)
 - docs/specs/phase7-spec.md    — sync SPMC broadcast ring (ordering, loom, stress, false-sharing bench)
 - docs/specs/phase8-spec.md    — engine end-to-end assembly + production-to-consumption latency
-- docs/specs/phase9-spec.md    — CURRENT: top-down microarchitecture teardown (docs/PROFILING.md)
+- docs/specs/phase9-spec.md    — top-down microarchitecture teardown (docs/PROFILING.md)
+- docs/specs/phase10-spec.md   — CURRENT: DoD close-out + distribution-ready artifacts
 
 ## Hard rules
-1. book/feed/sync are FROZEN/done. Phase 9 adds ONLY bench profiling scaffolding
-   (profile/branch-exp/cache-exp subcommands + a bench-local branchless variant)
-   and docs/PROFILING.md. No book impl is modified — the branchless rewrite is an
-   EXPERIMENT in bench, not a change to the frozen core.
-2. PMU access is NOT guaranteed. Collect perf counters IF available (raw output +
-   perf_summary.csv); ALWAYS collect the PMU-free behavioral evidence:
-   - misprediction signature: branchy slow only on RANDOM keys; branchless flat.
-   - cache signature: latency vs footprint crossing L1/L2/LLC (read sizes from /sys).
-   Never fabricate counters; record unavailability as a threat to validity.
-3. The four frozen impls are a microarchitecture taxonomy: SortedVec=Bad Speculation,
-   BTree=Memory Bound, RevVec=Core/Retiring(rising with depth), FlatBook=Retiring
-   (until recenter=Memory Bound). PROFILING.md confirms each and EXPLAINS the Phase 4
-   crossover + Phase 5 real-data inversion mechanistically.
-4. The branchless answer is realized STRUCTURALLY by FlatBook's direct index; the
-   bench branchless-binary-search experiment QUANTIFIES the instruction-level
-   alternative. State the freeze + FlatBook framing; don't patch the core.
-5. Measurement hygiene: isolated untimed hot loop for perf; black_box; pinning;
-   warmup; recorded clock floor; >=10M samples/cell; governor recorded.
-6. PROFILING.md is built ONLY from committed data, Writing-Standard-clean. Highest-
-   signal artifact: numbers carry the weight, honesty (incl. refuted hypotheses,
-   perf unavailability) is the signal.
+1. System is DONE. Phase 10 writes docs (BENCHMARKS/ARCHITECTURE/README/x-thread/
+   SELF-AUDIT), fixes ONE host-dependent test honestly, adds license + CI. book/feed/
+   sync primitive logic unchanged; six frozen book files byte-identical; zero unsafe holds.
+2. Build EVERY artifact ONLY from committed CSVs + PROFILING.md. Re-derive headline
+   numbers from the CSVs; cite each inline; invent nothing.
+3. PUBLIC FRAMING = pure low-latency systems / LOB artifact. The microVM-sandbox / AI-
+   infra angle is INTERNAL strategy, NOT the public framing. Primitives may be noted as
+   general-purpose substrate; do not headline the flagship.
+4. Honesty is the signal: FEATURE the real-data inversion, the SortedVec=memory-bound
+   refutation (std binary search already branchless), the true-sharing decline, and the
+   perf-unavailable-but-PMU-free rigor. No marketing/hype/emoji; numbers carry it.
+5. Distribution doctrine: proof-first, findings-not-hype, lead with the link, engage
+   technically. Service vs response time never blurred; units + conditions always.
+6. cargo test --workspace must end GREEN: fix e2e::high_rate_produces_overruns host-
+   robustly (or #[ignore] with a documented reason + note where the property is still
+   covered). No silent property deletion.
+7. SELF-AUDIT is the HUMAN's gate; the agent writes the study aid (hardest mechanisms +
+   canonical explanations), stating the human owns comprehension.
 
 ## Scope discipline
-Work ONLY on the given session. End green (build + clippy -D warnings + test; the
-loom session also runs --cfg loom green), commit, list changes + headline numbers, STOP.
+Work ONLY on the given session. End green (build + clippy -D warnings + test), commit,
+list changes, STOP.

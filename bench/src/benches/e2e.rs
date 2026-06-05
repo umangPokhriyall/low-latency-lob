@@ -663,23 +663,52 @@ mod tests {
         );
     }
 
-    /// A high rate against a tiny ring forces overruns that resync from the seqlock —
-    /// the composition behaviour, exercised through the benchmark path.
+    /// The producer lapping a slower consumer must surface as an `Overrun` that
+    /// reports skipped positions and resyncs from the seqlock — the composition
+    /// behaviour the engine guarantees.
+    ///
+    /// This is driven **structurally**, not by racing two threads at a high rate:
+    /// the consumer joins live (cursor 0), then the producer pushes far more events
+    /// than the ring can hold *before the consumer polls once*. The lap is therefore
+    /// guaranteed by `events_pushed > ring_capacity` regardless of host speed — the
+    /// earlier rate-driven version passed only on hosts slow enough that the consumer
+    /// fell behind, and failed on fast ones (host-dependent, not a regression).
+    /// The full multi-threaded saturated path is still exercised by `run_cell` in the
+    /// real benchmark; the concurrent overrun→resync property is additionally covered
+    /// by the `sync` ring stress tests and the loom model.
     #[test]
     fn high_rate_produces_overruns() {
-        let clock = BenchClock::new();
-        // Build a long corpus so a free-running producer laps the consumer.
-        let mut evs = vec![BookEvent::clear(0, 0)];
-        for i in 1..=20_000u64 {
+        const RING: usize = 8;
+        const PUSHES: u64 = 1_000; // >> RING, so the producer laps the idle consumer
+
+        let (mut producer, handle) = Engine::<BTreeBook>::new(RING);
+        // Mint the consumer first: it joins at write position 0 and does NOT poll
+        // while the producer runs ahead.
+        let mut consumer = handle.consumer();
+
+        for i in 1..=PUSHES {
             let px = i64::try_from(i % 128 + 1).unwrap();
             let q = i64::try_from(1 + i % 7).unwrap();
-            evs.push(BookEvent::level(i, i, Side::Bid, Px(1_000 - px), Qty(q)));
+            producer.process(&BookEvent::level(i, i, Side::Bid, Px(1_000 - px), Qty(q)));
         }
-        let corpus = Corpus::from_events(evs);
-        let opts = BenchOpts { core: 0, speed: 1, skip_real: true };
-        // 1e9 eps target => producer free-runs; the single consumer is lapped.
-        let cell = run_cell(&clock, &opts, corpus.events(), Schedule::FixedRate(1_000_000_000), 1);
-        assert!(cell.total_overruns > 0, "a saturated tiny ring must overrun the consumer");
-        assert!(cell.total_skipped > 0, "overrun must report skipped positions");
+
+        // The very first poll finds its slot overwritten: an overrun reporting how
+        // many positions were skipped, with a consistent seqlock snapshot to rebase
+        // from. (`saturating_sub`-style accounting in the ring guarantees skipped > 0
+        // once the producer has lapped.)
+        let (mut overruns, mut skipped) = (0u64, 0u64);
+        loop {
+            match consumer.poll() {
+                Observed::Overrun { skipped: s, .. } => {
+                    overruns += 1;
+                    skipped += s;
+                }
+                Observed::Event(_) => {} // tail events after the lap, delivered cleanly
+                Observed::Idle => break, // caught up to the producer
+            }
+        }
+        assert!(overruns > 0, "the producer lapping an idle consumer must overrun it");
+        assert!(skipped > 0, "an overrun must report the skipped positions");
+        assert!(consumer.resyncs > 0, "each overrun resyncs derived state from the seqlock");
     }
 }
