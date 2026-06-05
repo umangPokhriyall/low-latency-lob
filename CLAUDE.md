@@ -66,24 +66,31 @@ host-specific; the benchmark host is documented in the README.
 - docs/specs/phase5-spec.md    — FlatBook, four-way oracle, final verdict
 - docs/specs/phase6-spec.md    — sync seqlock (memory ordering, loom, stress, contention)
 - docs/specs/phase7-spec.md    — sync SPMC broadcast ring (ordering, loom, stress, false-sharing bench)
-- docs/specs/phase8-spec.md    — CURRENT: engine end-to-end assembly + production-to-consumption latency
+- docs/specs/phase8-spec.md    — engine end-to-end assembly + production-to-consumption latency
+- docs/specs/phase9-spec.md    — CURRENT: top-down microarchitecture teardown (docs/PROFILING.md)
 
 ## Hard rules
-1. book frozen; sync primitives (seqlock, ring) UNCHANGED; feed unchanged. Phase 8
-   adds the engine crate + one bench benchmark (bench -> engine edge).
-2. The pipeline: feed replay -> book.apply -> seqlock.store(top) -> ring.push(pack(ev))
-   on a pinned producer; pinned independent consumers poll/try_recv, resync from the
-   seqlock on Overrun. engine = logic; bench = threads/pinning/timing.
-3. Engine<B: OrderBook> monomorphized (NO dyn). Headline = BTreeBook (real-data
-   champion) on the real BTCUSDT corpus. engine owns BookEvent<->[u64;5] packing,
-   validated at unpack (no transmute).
-4. #![forbid(unsafe_code)] in engine; workspace zero-unsafe invariant holds.
-5. End-to-end latency is CO-correct: production->consumption vs the SCHEDULED arrival
-   (event.ts = scheduled ns; latency = now - ts), never push time. Phase 4 methodology.
-6. TRUE SHARING on the write cursor (Phase 7) will make producer throughput fall with
-   K. MEASURE and REPORT it, attribute it correctly (true not false sharing). Do NOT
-   modify the verified sync primitives to fix it; document the batched-recv mitigation
-   as a hypothesis for the flagship. e2e.md is interim; record the governor.
+1. book/feed/sync are FROZEN/done. Phase 9 adds ONLY bench profiling scaffolding
+   (profile/branch-exp/cache-exp subcommands + a bench-local branchless variant)
+   and docs/PROFILING.md. No book impl is modified — the branchless rewrite is an
+   EXPERIMENT in bench, not a change to the frozen core.
+2. PMU access is NOT guaranteed. Collect perf counters IF available (raw output +
+   perf_summary.csv); ALWAYS collect the PMU-free behavioral evidence:
+   - misprediction signature: branchy slow only on RANDOM keys; branchless flat.
+   - cache signature: latency vs footprint crossing L1/L2/LLC (read sizes from /sys).
+   Never fabricate counters; record unavailability as a threat to validity.
+3. The four frozen impls are a microarchitecture taxonomy: SortedVec=Bad Speculation,
+   BTree=Memory Bound, RevVec=Core/Retiring(rising with depth), FlatBook=Retiring
+   (until recenter=Memory Bound). PROFILING.md confirms each and EXPLAINS the Phase 4
+   crossover + Phase 5 real-data inversion mechanistically.
+4. The branchless answer is realized STRUCTURALLY by FlatBook's direct index; the
+   bench branchless-binary-search experiment QUANTIFIES the instruction-level
+   alternative. State the freeze + FlatBook framing; don't patch the core.
+5. Measurement hygiene: isolated untimed hot loop for perf; black_box; pinning;
+   warmup; recorded clock floor; >=10M samples/cell; governor recorded.
+6. PROFILING.md is built ONLY from committed data, Writing-Standard-clean. Highest-
+   signal artifact: numbers carry the weight, honesty (incl. refuted hypotheses,
+   perf unavailability) is the signal.
 
 ## Scope discipline
 Work ONLY on the given session. End green (build + clippy -D warnings + test; the

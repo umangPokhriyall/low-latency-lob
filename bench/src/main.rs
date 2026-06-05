@@ -35,6 +35,12 @@ fn main() {
         "ring" => benches::ring::run(rest),
         // Benchmark 7 — end-to-end production-to-consumption latency (Phase 8).
         "e2e" => benches::e2e::run(rest),
+        // Phase 9 — isolated untimed apply/search hot loop (external perf target).
+        "profile" => benches::profile::run(rest),
+        // Phase 9 — branch-misprediction 2×2 signature (branchy vs branchless).
+        "branch-exp" => benches::branch_exp::run(rest),
+        // Phase 9 — cache-hierarchy footprint signature (L1/L2/LLC crossings).
+        "cache-exp" => benches::cache_exp::run(rest),
         // Render every §9 figure + env.json strictly from the committed CSVs.
         "plot" => plot::run(rest),
         // `all` chains every benchmark then renders the plots + env.json last.
@@ -51,8 +57,11 @@ fn main() {
         }
         _ => {
             eprintln!(
-                "usage: bench <service|read|sustained|throughput|flatmem|seqlock|ring|e2e|plot|all> \
-                 [--samples N] [--warmup N] [--core N] [--speed N] [--no-real] [--out DIR]"
+                "usage: bench <service|read|sustained|throughput|flatmem|seqlock|ring|e2e|\
+                 profile|branch-exp|cache-exp|plot|all> \
+                 [--samples N] [--warmup N] [--core N] [--speed N] [--no-real] [--out DIR]\n\
+                 profile: --impl btree|sorted|rev|flat --op apply|search --depth D \
+                 --locality concentrated|uniform --iters N [--core C]"
             );
             std::process::exit(2);
         }

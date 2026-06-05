@@ -375,6 +375,124 @@ fn e2e_producer_throughput_figure(out_dir: &Path, rows: &[Vec<String>]) {
     }
 }
 
+/// Branch-misprediction 2×2 (§3.1): p50 ns per lookup vs sorted-array depth, four
+/// series — branchy/branchless × predictable/random. The branchy/random line sits
+/// far above branchy/predictable (the misprediction penalty); both branchless
+/// lines are flat and overlap (no data-dependent branch). Source
+/// `branch_experiment.csv` (cols: `variant,key_pattern,depth,samples,oh,p50,p99,mean`).
+fn branch_figure(out_dir: &Path, results: &Path) {
+    let rows = load_rows(&results.join("branch_experiment.csv"));
+    let specs: [(&'static str, &str, &str, RGBColor); 4] = [
+        ("branchy/random", "branchy", "random", RGBColor(200, 30, 30)),
+        ("branchy/predictable", "branchy", "predictable", RGBColor(235, 140, 140)),
+        ("branchless/random", "branchless", "random", RGBColor(30, 80, 200)),
+        ("branchless/predictable", "branchless", "predictable", RGBColor(120, 165, 235)),
+    ];
+    let series: Vec<Series> = specs
+        .iter()
+        .map(|(label, var, pat, color)| {
+            let mut pts: Vec<(f64, f64)> = rows
+                .iter()
+                .filter(|r| r.len() > 5 && r[0] == *var && r[1] == *pat)
+                .filter_map(|r| Some((r[2].parse::<f64>().ok()?, r[5].parse::<f64>().ok()?)))
+                .collect();
+            pts.sort_by(|a, b| a.0.total_cmp(&b.0));
+            (*label, *color, pts)
+        })
+        .collect();
+    let out = out_dir.join("branch_misprediction_2x2.svg");
+    if let Err(e) = render(
+        &out,
+        "branch misprediction 2x2: p50 ns/lookup vs depth (branchy slow only on random)",
+        "branch_experiment.csv",
+        "sorted array depth (levels, log)",
+        "p50 latency (ns/lookup, log)",
+        true,
+        &series,
+    ) {
+        eprintln!("warn: branch figure: {e}");
+    }
+}
+
+/// Parse a `/sys` cache `size` string (`"48K"`, `"8192K"`, `"8M"`) to bytes.
+fn parse_cache_size(s: &str) -> f64 {
+    let s = s.trim();
+    let (num, mult) = match s.chars().last() {
+        Some('K') => (&s[..s.len() - 1], 1024.0),
+        Some('M') => (&s[..s.len() - 1], 1024.0 * 1024.0),
+        Some('G') => (&s[..s.len() - 1], 1024.0 * 1024.0 * 1024.0),
+        _ => (s, 1.0),
+    };
+    num.trim().parse::<f64>().unwrap_or(0.0) * mult
+}
+
+/// Host L1d / L2 / LLC boundaries (bytes) for the cache figure's vertical lines.
+fn cache_boundaries() -> Vec<(&'static str, f64, RGBColor)> {
+    let read = |idx: usize, field: &str| {
+        std::fs::read_to_string(format!("/sys/devices/system/cpu/cpu0/cache/index{idx}/{field}"))
+            .ok()
+            .map(|s| s.trim().to_string())
+    };
+    let (mut l1d, mut l2, mut llc) = (0.0f64, 0.0f64, 0.0f64);
+    for idx in 0..16 {
+        let Some(level) = read(idx, "level") else { break };
+        let kind = read(idx, "type").unwrap_or_default();
+        let size = read(idx, "size").map_or(0.0, |s| parse_cache_size(&s));
+        match (level.as_str(), kind.as_str()) {
+            ("1", "Data") => l1d = size,
+            ("2", _) => l2 = size,
+            ("3", _) => llc = size,
+            _ => {}
+        }
+    }
+    vec![
+        ("L1d", l1d, RGBColor(120, 120, 120)),
+        ("L2", l2, RGBColor(120, 120, 120)),
+        ("LLC", llc, RGBColor(120, 120, 120)),
+    ]
+}
+
+/// Cache-footprint latency curve (§3.2): update p50 vs per-side footprint bytes,
+/// one line per impl, with L1d/L2/LLC boundary lines annotated. Source
+/// `cache_experiment.csv` (cols: `impl,depth,footprint_bytes,level,samples,oh,p50,p99`).
+fn cache_figure(out_dir: &Path, results: &Path) {
+    let rows = load_rows(&results.join("cache_experiment.csv"));
+    let mut series: Vec<Series> = harness::IMPLS
+        .iter()
+        .map(|&name| {
+            let mut pts: Vec<(f64, f64)> = rows
+                .iter()
+                .filter(|r| r.len() > 6 && r[0] == name)
+                .filter_map(|r| Some((r[2].parse::<f64>().ok()?, r[6].parse::<f64>().ok()?)))
+                .collect();
+            pts.sort_by(|a, b| a.0.total_cmp(&b.0));
+            (name, impl_color(name), pts)
+        })
+        .collect();
+    if series.iter().all(|s| s.2.is_empty()) {
+        eprintln!("warn: no data for cache figure — skipped");
+        return;
+    }
+    let ymax = series.iter().flat_map(|s| s.2.iter().map(|p| p.1)).fold(1.0f64, f64::max);
+    for (label, sz, color) in cache_boundaries() {
+        if sz > 0.0 {
+            series.push((label, color, vec![(sz, 0.5), (sz, ymax * 1.2)]));
+        }
+    }
+    let out = out_dir.join("cache_footprint_latency.svg");
+    if let Err(e) = render(
+        &out,
+        "apply update p50 vs per-side footprint (vertical lines = L1d/L2/LLC)",
+        "cache_experiment.csv",
+        "per-side footprint (bytes, log)",
+        "update p50 latency (ns, log)",
+        true,
+        &series,
+    ) {
+        eprintln!("warn: cache figure: {e}");
+    }
+}
+
 /// Build one series per producer mode from a numeric column of `ring_bench.csv`
 /// (x = consumer count, col 1).
 fn ring_series_by_mode(rows: &[Vec<String>], col: usize) -> Vec<Series> {
@@ -480,6 +598,11 @@ pub fn run(args: &[String]) {
     let e2e = load_rows(&results.join("e2e.csv"));
     e2e_p99_vs_rate_figure(&plots, &e2e);
     e2e_producer_throughput_figure(&plots, &e2e);
+
+    // Phase 9 (microarchitecture teardown): the misprediction 2×2 and the
+    // cache-footprint latency curve, each citing its experiment CSV.
+    branch_figure(&plots, &results);
+    cache_figure(&plots, &results);
 
     eprintln!("plots in {}", plots.display());
 }

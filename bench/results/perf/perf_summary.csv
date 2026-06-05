@@ -1,0 +1,21 @@
+# Phase 9 hardware-counter (PMU) summary — STATUS: UNAVAILABLE on this host.
+#
+# The `perf` binary is present (/usr/bin/perf) but the kernel denies counter
+# access: kernel.perf_event_paranoid = 4, and this process has neither
+# CAP_PERFMON nor CAP_SYS_ADMIN. `perf stat -e cycles,instructions true` and
+# `perf stat --topdown true` both fail with "No supported events found. Access to
+# performance monitoring and observability operations is limited." (raw capture:
+# bench/results/perf/perf_unavailable.txt).
+#
+# Therefore NO hardware counters were collected and NONE are fabricated (phase9
+# spec §2.3, §8.2). The top-down taxonomy is confirmed instead by the PMU-free
+# behavioral evidence, which is self-sufficient (spec §3):
+#   - branch_experiment.csv  — the misprediction signature (branchy slow only on
+#                              random keys; branchless flat across predictability).
+#   - cache_experiment.csv   — the cache-hierarchy signature (latency vs footprint
+#                              crossing L1/L2/LLC; pointer-chase vs contiguous).
+# perf permission is recorded as a threat to validity in docs/PROFILING.md.
+#
+# The parsed-counter schema is retained below so a re-run on a PMU-enabled host
+# (perf_event_paranoid <= 1, or with CAP_PERFMON) can populate it unchanged.
+impl,op,depth,locality,iters,cycles,instructions,ipc,branch_miss_rate,l1d_miss_rate,llc_miss_rate,td_retiring,td_bad_spec,td_frontend,td_backend

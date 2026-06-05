@@ -45,6 +45,33 @@ pub fn build_at_depth<B: OrderBook>(mid: Px, depth: usize) -> B {
     b
 }
 
+/// Build a book with `depth` levels per side around `mid`, applying levels in
+/// globally **ascending** price order (lowest bid up to highest ask) so the
+/// contiguous binary-search Vec builds in O(N log N) — every new price appends
+/// at the end of the sorted run — rather than the O(N²) front-insert order
+/// [`build_at_depth`] produces. The final book is byte-for-byte the state
+/// [`build_at_depth`] yields (a level set is order-independent); only the build
+/// cost differs. This lets the Phase 9 cache-footprint sweep reach the deep,
+/// LLC-crossing regime for the order-sensitive impls.
+///
+/// `RevVecBook` is O(N²) to build under *any* order — its locate is a linear
+/// scan from the best end, which has no cheap bulk-load — so the cache sweep
+/// caps its depth rather than calling this for arbitrarily large `depth`.
+#[must_use]
+pub fn build_at_depth_fast<B: OrderBook>(mid: Px, depth: usize) -> B {
+    let mut b = B::default();
+    let d = i64::try_from(depth).expect("depth fits i64");
+    // Bids: lowest price (mid - STEP*depth) first, ascending up to mid - STEP.
+    for i in (1..=d).rev() {
+        b.apply(&BookEvent::level(0, 0, Side::Bid, Px(mid.0 - STEP * i), Qty(1_000 + i)));
+    }
+    // Asks: lowest price (mid + STEP) first, ascending up to mid + STEP*depth.
+    for i in 1..=d {
+        b.apply(&BookEvent::level(0, 0, Side::Ask, Px(mid.0 + STEP * i), Qty(1_000 + i)));
+    }
+    b
+}
+
 /// Offset-from-best (0 = best, nearest mid) of an EXISTING level, drawn per
 /// `Locality`. `Uniform`: flat over `0..depth`. `Concentrated`: geometric via
 /// fair coin flips — `P(offset=k) ≈ 2^-(k+1)`, so mostly offsets 0..3 — capped
@@ -104,6 +131,40 @@ mod tests {
             // Best bid is the level nearest mid (offset 0).
             assert_eq!(b.best_bid().map(|(p, _)| p), Some(Px(1_000_000 - STEP)));
             assert_eq!(b.best_ask().map(|(p, _)| p), Some(Px(1_000_000 + STEP)));
+        }
+    }
+
+    /// The fast ascending builder yields a book observationally identical to the
+    /// canonical [`build_at_depth`]: same depth, best, and full ladder on both
+    /// sides. (Across all four impls the final level set is order-independent.)
+    #[test]
+    fn build_fast_matches_build_at_depth() {
+        use book::{BTreeBook, FlatBook, OrderBook, SortedVecBook};
+
+        fn ladder<B: OrderBook>(b: &B, side: Side) -> Vec<(Px, Qty)> {
+            let mut out = vec![(Px::ZERO, Qty::ZERO); b.depth(side)];
+            let n = b.top_n(side, &mut out);
+            out.truncate(n);
+            out
+        }
+        fn check<B: OrderBook>(mid: Px, depth: usize) {
+            let slow: B = build_at_depth(mid, depth);
+            let fast: B = build_at_depth_fast(mid, depth);
+            for side in [Side::Bid, Side::Ask] {
+                assert_eq!(slow.depth(side), depth);
+                assert_eq!(fast.depth(side), depth);
+                assert_eq!(ladder(&slow, side), ladder(&fast, side), "ladder mismatch d={depth}");
+            }
+            assert_eq!(slow.best_bid(), fast.best_bid());
+            assert_eq!(slow.best_ask(), fast.best_ask());
+        }
+
+        let mid = Px(1_000_000);
+        for &depth in &[1usize, 2, 7, 64, 300] {
+            check::<SortedVecBook>(mid, depth);
+            check::<RevVecBook>(mid, depth);
+            check::<BTreeBook>(mid, depth);
+            check::<FlatBook>(mid, depth);
         }
     }
 
