@@ -1,7 +1,9 @@
 /target
-
+CLAUDE.md
+/docs/specs
 # editor / OS cruft — never bench/results or feed/corpus
 /.idea
 /.vscode
 *.swp
 .DS_Store
+NORTH-STAR.md
