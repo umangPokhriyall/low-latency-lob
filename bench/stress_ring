@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# bench/stress_ring — the SPMC ring contention pass, as a `perf c2c record` target
+# (docs/specs/bare-metal-rerun-spec.md §A.8). metal_run.sh runs:
+#     perf c2c record -o .../c2c_ring.data -- bash -c "WRITER_CORE=.. READER_CORES=.. bench/stress_ring"
+# so perf c2c observes the HITM cache-line transfers of the single-producer/many-
+# consumer ring. Expectation: TRUE-sharing HITM on the shared write cursor (the
+# Phase 7/8 attribution, upgraded from inferred to measured — spec §0).
+#
+# Producer pinned to $WRITER_CORE; consumers spread across CCDs via $READER_CORES.
+#
+# Env: WRITER_CORE (producer core), READER_CORES.
+set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+require_bench
+
+WRITER_CORE="${WRITER_CORE:-0}"
+READER_CORES="${READER_CORES:-1}"
+CPUSET="$WRITER_CORE,$READER_CORES"
+echo "stress_ring: producer $WRITER_CORE consumers $READER_CORES (mask $CPUSET) — perf c2c target"
+
+PRODUCER_CORE="$WRITER_CORE" READER_CORES="$READER_CORES" \
+  numa "$CPUSET" -- "$BENCH" ring --core "$WRITER_CORE" --reader-cores "$READER_CORES" "$@"

@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# bench/stress_seqlock — the seqlock contention pass, as a `perf c2c record` target
+# (docs/specs/bare-metal-rerun-spec.md §A.8). metal_run.sh runs:
+#     perf c2c record -o .../c2c_seqlock.data -- bash -c "WRITER_CORE=.. READER_CORES=.. bench/stress_seqlock"
+# so perf c2c observes the HITM cache-line transfers of the single-writer/many-reader
+# seqlock cell. Expectation: NO false-sharing HITM on the #[repr(align(64))] slots.
+#
+# Writer pinned to $WRITER_CORE; readers spread across CCDs via $READER_CORES. This
+# is the SAME workload as run_contention's seqlock cell — kept as a standalone target
+# so perf c2c wraps only the contended region.
+#
+# Env: WRITER_CORE, READER_CORES.
+set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+require_bench
+
+WRITER_CORE="${WRITER_CORE:-0}"
+READER_CORES="${READER_CORES:-1}"
+CPUSET="$WRITER_CORE,$READER_CORES"
+echo "stress_seqlock: writer $WRITER_CORE readers $READER_CORES (mask $CPUSET) — perf c2c target"
+
+WRITER_CORE="$WRITER_CORE" READER_CORES="$READER_CORES" \
+  numa "$CPUSET" -- "$BENCH" seqlock --core "$WRITER_CORE" --reader-cores "$READER_CORES" "$@"

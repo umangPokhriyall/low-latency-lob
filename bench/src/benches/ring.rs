@@ -87,14 +87,27 @@ impl ProducerMode {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct BenchOpts {
     /// Recorded `push` samples (the producer's timed budget, N).
     samples: u64,
     /// Untimed warmup iterations per thread.
     warmup: u64,
-    /// The producer's pinned core; consumers take `core+1 .. core+1+K`.
+    /// The producer's pinned core (`--core` / `PRODUCER_CORE`).
     core: usize,
+    /// Explicit consumer cores (`--reader-cores` / `READER_CORES`), each consumer
+    /// `r` pinning to `reader_cores[r]`; empty ⇒ the contiguous `core+1+r` default.
+    /// On the metal box these are spread across CCDs to maximize cross-CCD
+    /// coherence traffic for `perf c2c` (spec §3, §A.8).
+    reader_cores: Vec<usize>,
+}
+
+impl BenchOpts {
+    /// The pinned core for consumer `r`: the explicit list entry if present, else the
+    /// contiguous `core+1+r` fallback (unchanged laptop behavior).
+    fn consumer_core(&self, r: usize) -> usize {
+        self.reader_cores.get(r).copied().unwrap_or(self.core + 1 + r)
+    }
 }
 
 /// The per-consumer tally returned from each consumer thread.
@@ -264,7 +277,7 @@ fn run_cell(
             let c = handle.consumer();
             let clock = Arc::clone(clock);
             let done = Arc::clone(&done);
-            let (warmup, core) = (opts.warmup, opts.core + 1 + r);
+            let (warmup, core) = (opts.warmup, opts.consumer_core(r));
             thread::spawn(move || run_consumer(&clock, c, core, warmup, total, &done))
         })
         .collect();
@@ -359,7 +372,8 @@ impl Row {
 fn parse(args: &[String]) -> (BenchOpts, PathBuf) {
     let mut samples = 1_000_000u64;
     let mut warmup = 100_000u64;
-    let mut core = 0usize;
+    // Producer core: `--core` flag wins; else `PRODUCER_CORE` env (metal-run plumbing); else 0.
+    let mut core = harness::env_core("PRODUCER_CORE").unwrap_or(0);
     let mut out = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/results"));
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -367,6 +381,10 @@ fn parse(args: &[String]) -> (BenchOpts, PathBuf) {
             "--samples" => samples = it.next().and_then(|s| s.parse().ok()).unwrap_or(samples),
             "--warmup" => warmup = it.next().and_then(|s| s.parse().ok()).unwrap_or(warmup),
             "--core" => core = it.next().and_then(|s| s.parse().ok()).unwrap_or(core),
+            // Consumed by harness::reader_cores below; skip its value here.
+            "--reader-cores" => {
+                it.next();
+            }
             "--out" => {
                 if let Some(d) = it.next() {
                     out = PathBuf::from(d);
@@ -375,7 +393,8 @@ fn parse(args: &[String]) -> (BenchOpts, PathBuf) {
             _ => {}
         }
     }
-    (BenchOpts { samples, warmup, core }, out)
+    let reader_cores = harness::reader_cores(args);
+    (BenchOpts { samples, warmup, core, reader_cores }, out)
 }
 
 /// Logical-core count, for capping the consumer ladder (producer core + K consumers).
@@ -391,18 +410,25 @@ pub fn run(args: &[String]) {
     let clock = Arc::new(BenchClock::new());
     let overhead = clock.overhead_ns();
     let cores = logical_cores();
-    let max_consumers = cores.saturating_sub(1).max(1);
+    // An explicit consumer-core list caps K to its length (consumers pin to those exact
+    // cores); otherwise reserve one core for the producer and cap at 1 + K ≤ logical cores.
+    let max_consumers = if opts.reader_cores.is_empty() {
+        cores.saturating_sub(1).max(1)
+    } else {
+        opts.reader_cores.len()
+    };
     let ladder: Vec<usize> =
         CONSUMER_LADDER.iter().copied().filter(|&k| k <= max_consumers).collect();
 
     eprintln!(
         "ring: samples(push)={} warmup={} producer_core={} logical_cores={} \
-         K-ladder={ladder:?} (capped; {} skipped) cap={RING_CAP} words={WORDS} \
+         consumer_cores={:?} K-ladder={ladder:?} (capped; {} skipped) cap={RING_CAP} words={WORDS} \
          paced_rate={FEED_RATE_HZ}Hz clock_overhead_ns={overhead}",
         opts.samples,
         opts.warmup,
         opts.core,
         cores,
+        opts.reader_cores,
         CONSUMER_LADDER.len() - ladder.len(),
     );
 
@@ -486,7 +512,7 @@ mod tests {
     #[test]
     fn cell_runs_and_records() {
         let clock = Arc::new(BenchClock::new());
-        let opts = BenchOpts { samples: 20_000, warmup: 1_000, core: 0 };
+        let opts = BenchOpts { samples: 20_000, warmup: 1_000, core: 0, reader_cores: Vec::new() };
         let cell = run_cell(&clock, &opts, 2, ProducerMode::FullTilt);
         assert_eq!(cell.push.count(), LATENCY_PUSHES, "the latency pass records every timed push");
         assert_eq!(cell.pushed, 20_000, "producer_mev_s is over the `samples` throughput budget");
@@ -509,7 +535,7 @@ mod tests {
     #[test]
     fn paced_producer_is_throttled() {
         let clock = Arc::new(BenchClock::new());
-        let opts = BenchOpts { samples: 40_000, warmup: 1_000, core: 0 };
+        let opts = BenchOpts { samples: 40_000, warmup: 1_000, core: 0, reader_cores: Vec::new() };
         let full = run_cell(&clock, &opts, 1, ProducerMode::FullTilt);
         let paced = run_cell(&clock, &opts, 1, ProducerMode::Paced);
         assert!(
