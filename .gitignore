@@ -6,4 +6,5 @@ CLAUDE.md
 /.vscode
 *.swp
 .DS_Store
+/docs/x-thread.md
 NORTH-STAR.md
