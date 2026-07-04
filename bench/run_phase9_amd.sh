@@ -57,11 +57,14 @@ mkdir -p "$PERF_DIR"
 for impl in btree sorted rev flat; do
   out="$PERF_DIR/perf_${impl}.txt"
   echo "run_phase9_amd: profiling impl=$impl -> $out"
+  # perf stat -M <group> exits non-zero on counter multiplexing even when it writes
+  # the report; tolerate so the loop profiles EVERY impl ($out is written regardless).
   numa "$PRODUCER_CORE" -- \
     perf stat -M "$PERF_METRIC_GROUP" -e "$PERF_EVENTS" -o "$out" \
       -- "$BENCH" profile --impl "$impl" --op apply \
          --depth "$PROFILE_DEPTH" --locality "$PROFILE_LOCALITY" \
-         --iters "$PROFILE_ITERS" --core "$PRODUCER_CORE"
+         --iters "$PROFILE_ITERS" --core "$PRODUCER_CORE" \
+    || echo "run_phase9_amd: perf stat impl=$impl exit $? — benign perf -M multiplexing; $out written, continuing"
 done
 
 echo "run_phase9_amd: done — raw counters in $PERF_DIR/perf_<impl>.txt"
