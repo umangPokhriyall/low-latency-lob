@@ -1,0 +1,36 @@
+# started on Sat Jul  4 10:48:38 2026
+
+
+ Performance counter stats for '/home/ubuntu/rust/low-latency-lob/target/release/bench profile --impl btree --op apply --depth 2048 --locality uniform --iters 200000000 --core 0':
+
+    47,945,962,212      instructions                     #    1.33  insn per cycle              (20.00%)
+    36,169,501,122      cycles                                                                  (30.01%)
+     9,367,528,172      branches                                                                (30.02%)
+       760,957,259      branch-misses                    #    8.12% of all branches             (40.03%)
+     2,836,474,764      cache-references                                                        (50.02%)
+         9,929,046      cache-misses                     #    0.35% of all cache refs           (50.01%)
+       761,659,962      ex_ret_brn_misp                  #     28.3 %  bad_speculation_mispredicts
+                                                  #      0.0 %  bad_speculation_pipeline_restarts  (10.00%)
+   105,310,187,405      de_src_op_disp.all                                                      (10.00%)
+            41,253      resyncs_or_nc_redirects                                                 (10.00%)
+    36,211,433,847      ls_not_halted_cyc                                                       (10.00%)
+    43,812,291,200      ex_ret_ops                                                              (10.00%)
+     9,071,440,498      ex_no_retire.load_not_complete   #      5.4 %  backend_bound_cpu      
+                                                  #      9.1 %  backend_bound_memory     (9.99%)
+    31,564,285,593      de_no_dispatch_per_slot.backend_stalls                                        (9.99%)
+    14,420,227,090      ex_no_retire.not_complete                                               (9.99%)
+    36,180,785,568      ls_not_halted_cyc                                                       (9.99%)
+        56,429,172      ex_ret_ucode_ops                 #     20.1 %  retiring_fastpath      
+                                                  #      0.0 %  retiring_microcode       (10.00%)
+    36,201,153,572      ls_not_halted_cyc                                                       (10.00%)
+    43,799,980,491      ex_ret_ops                                                              (10.00%)
+    80,347,853,880      de_no_dispatch_per_slot.no_ops_from_frontend #     15.6 %  frontend_bound_bandwidth  (10.00%)
+     7,740,966,221      cpu/de_no_dispatch_per_slot.no_ops_from_frontend,cmask=0x6/ #     21.4 %  frontend_bound_latency   (10.00%)
+    36,181,413,631      ls_not_halted_cyc                                                       (10.00%)
+
+       8.762205805 seconds time elapsed
+
+       8.749025000 seconds user
+       0.012997000 seconds sys
+
+

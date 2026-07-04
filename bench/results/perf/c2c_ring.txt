@@ -1,0 +1,93 @@
+=================================================
+            Trace Event Information              
+=================================================
+  Total records                     :      27447
+  Locked Load/Store Operations      :          0
+  Load Operations                   :       6078
+  Loads - uncacheable               :          0
+  Loads - IO                        :          0
+  Loads - Miss                      :          0
+  Loads - no mapping                :       1047
+  Load Fill Buffer Hit              :          0
+  Load L1D hit                      :       5018
+  Load L2D hit                      :          4
+  Load LLC hit                      :          0
+  Load Local HITM                   :          0
+  Load Remote HITM                  :          3
+  Load Remote HIT                   :          0
+  Load Local DRAM                   :          2
+  Load Remote DRAM                  :          0
+  Load MESI State Exclusive         :          2
+  Load MESI State Shared            :          0
+  Load LLC Misses                   :          5
+  Load access blocked by data       :          0
+  Load access blocked by address    :          0
+  Load HIT Local Peer               :          0
+  Load HIT Remote Peer              :          0
+  LLC Misses to Local DRAM          :       40.0%
+  LLC Misses to Remote DRAM         :        0.0%
+  LLC Misses to Remote cache (HIT)  :        0.0%
+  LLC Misses to Remote cache (HITM) :       60.0%
+  Store Operations                  :       1078
+  Store - uncacheable               :          0
+  Store - no mapping                :        254
+  Store L1D Hit                     :        379
+  Store L1D Miss                    :          0
+  Store No available memory level   :         80
+  No Page Map Rejects               :         53
+  Unable to parse data source       :      20291
+
+=================================================
+    Global Shared Cache Line Event Information   
+=================================================
+  Total Shared Cache Lines          :          2
+  Load HITs on shared lines         :         27
+  Fill Buffer Hits on shared lines  :          0
+  L1D hits on shared lines          :         23
+  L2D hits on shared lines          :          0
+  LLC hits on shared lines          :          0
+  Load hits on peer cache or nodes  :          0
+  Locked Access on shared lines     :          0
+  Blocked Access on shared lines    :          0
+  Store HITs on shared lines        :         99
+  Store L1D hits on shared lines    :         21
+  Store No available memory level   :         78
+  Total Merged records              :        102
+
+=================================================
+                 c2c details                     
+=================================================
+  Events                            : ibs_op//
+  Cachelines sort on                : Total HITMs
+  Cacheline data grouping           : offset,iaddr
+
+=================================================
+           Shared Data Cache Line Table          
+=================================================
+#
+#        ----------- Cacheline ----------      Tot  ------- Load Hitm -------    Total    Total    Total  --------- Stores --------  ----- Core Load Hit -----  - LLC Load Hit --  - RMT Load Hit --  --- Load Dram ----
+# Index             Address  Node  PA cnt     Hitm    Total  LclHitm  RmtHitm  records    Loads   Stores    L1Hit   L1Miss      N/A       FB       L1       L2    LclHit  LclHitm    RmtHit  RmtHitm       Lcl       Rmt
+# .....  ..................  ....  ......  .......  .......  .......  .......  .......  .......  .......  .......  .......  .......  .......  .......  .......  ........  .......  ........  .......  ........  ........
+#
+      0      0x624b89b17180     0       1   66.67%        2        0        2      124       25       99       21        0       78        0       23        0         0        0         0        2         0         0
+      1  0xff3b73af50bb3200     0       1   33.33%        1        0        1        1        1        0        0        0        0        0        0        0         0        0         0        1         0         0
+
+=================================================
+      Shared Cache Line Distribution Pareto      
+=================================================
+#
+#        ----- HITM -----  ------- Store Refs ------  --------- Data address ---------                      ---------- cycles ----------    Total       cpu                                  Shared                                      
+#   Num  RmtHitm  LclHitm   L1 Hit  L1 Miss      N/A              Offset  Node  PA cnt        Code address  rmt hitm  lcl hitm      load  records       cnt                          Symbol  Object                     Source:Line  Node
+# .....  .......  .......  .......  .......  .......  ..................  ....  ......  ..................  ........  ........  ........  .......  ........  ..............................  .....  ..............................  ....
+#
+  ----------------------------------------------------------------------
+      0        2        0       21        0       78      0x624b89b17180
+  ----------------------------------------------------------------------
+         100.00%    0.00%    0.00%    0.00%    0.00%                 0x0     0       1      0x624b6f7d4820       616         0         0        3         1  [.] std::sys::backtrace::__rus  bench  std::sys::backtrace::__rust_be   0
+           0.00%    0.00%    4.76%    0.00%   16.67%                 0x0     0       1      0x624b6f7d44aa         0         0         0       14         1  [.] std::sys::backtrace::__rus  bench  std::sys::backtrace::__rust_be   0
+           0.00%    0.00%   95.24%    0.00%   83.33%                 0x0     0       1      0x624b6f7d488a         0         0         0       85         1  [.] std::sys::backtrace::__rus  bench  std::sys::backtrace::__rust_be   0
+
+  ----------------------------------------------------------------------
+      1        1        0        0        0        0  0xff3b73af50bb3200
+  ----------------------------------------------------------------------
+         100.00%    0.00%    0.00%    0.00%    0.00%                 0x0     0       1  0xffffffffb319f14a       494         0         0        1         1  [k] perf_iterate_ctx  [kernel.kallsyms]  perf_iterate_ctx+106   0
