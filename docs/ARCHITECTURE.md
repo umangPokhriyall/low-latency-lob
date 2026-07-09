@@ -27,9 +27,9 @@ in the sections that follow.
   identical, so swapping one for another is sound, and no logic is copy-pasted across them.
 - **Honesty is the signal.** The writeups feature what underperformed — the flat array
   collapsing on real data, a predicted bottleneck refuted, a throughput decline the
-  original hypothesis did not predict, hardware counters unavailable on the host. An
-  honest negative result with a profile is the elite signal; this architecture is built to
-  surface them, not bury them.
+  original hypothesis did not predict, a PMU-free prediction later *confirmed* against
+  native AMD Zen 4 counters on rented bare metal. An honest negative result with a profile
+  is the elite signal; this architecture is built to surface them, not bury them.
 
 ---
 
@@ -191,7 +191,10 @@ the consumer resyncs to the oldest resident record. The per-slot stamp is what l
 broadcast bus detect lapping without coordinating with consumers — the producer **never
 blocks** (it overwrites on wrap), so no consumer can stall it. Slots are
 `#[repr(align(64))]`, one per cache line, with the write cursor isolated on its own line, a
-static `size_of::<Slot<W>>() % 64 == 0` assertion enforcing it.
+static `size_of::<Slot<W>>() % 64 == 0` assertion enforcing it. The EPYC re-run's 64 B
+cache line validates the alignment, and `perf c2c` directly measured the intended effect:
+no false-sharing HITM on the aligned slots, and the only true-sharing HITM on the single
+shared write cursor ([`BENCHMARKS.md`](BENCHMARKS.md) §4.2).
 
 ### 5.3 The zero-`unsafe` decision
 
@@ -273,8 +276,9 @@ numbers trustworthy:
   (`co_correct_records_accumulating_lag`).
 - **Hygiene on every cell:** inputs and outputs wrapped in `black_box`; the pinned core
   warmed before recording; ≥1,000,000 samples per service cell (10,000,384 lookups per
-  branch-experiment cell); the measured clock read-read floor (7 ns) reported and **never
-  subtracted**; threads pinned; the CPU governor recorded.
+  branch-experiment cell); the measured clock read-read floor (~10 ns on the EPYC re-run
+  host; 7 ns on the archived laptop) reported and **never subtracted**; threads pinned; the
+  CPU governor recorded (`performance` on the EPYC box, pinned to one CCD-0 core).
 - **Every number is sourced.** Each benchmark writes a committed CSV under
   `bench/results/`, and the environment (CPU, caches, governor, kernel, rustc, pinned core,
   clock floor, corpus fingerprints) is captured in `env.json`. The writeups re-derive every
@@ -295,9 +299,9 @@ Each NORTH-STAR engineering principle maps to a specific decision in this repo:
 | Sans-IO discipline | `book` has zero I/O, async, or dependencies; the same frozen core drives feed, bench, engine, and profiling unchanged (§3) |
 | Measure, never guess | four implementations behind one trait, judged by `throughput.csv` — the verdict inverted the intuition (§3, [`BENCHMARKS.md`](BENCHMARKS.md) §3.2) |
 | Distributions, not averages | every benchmark reports p50/p99/p99.9 + histograms (`.hgrm`); the CO-correct sustained/e2e tail is where saturation shows |
-| Mechanical sympathy | thread pinning, cache-line-aligned ring slots (`align(64)`), the recorded 7 ns clock floor, `target-cpu=native` for valid microarchitecture profiling |
+| Mechanical sympathy | thread pinning (producer on one CCD-0 core, readers across CCDs), cache-line-aligned ring slots (`align(64)`, validated by the EPYC 64 B line + `perf c2c`), the recorded clock floor (~10 ns EPYC), `target-cpu=native` for valid microarchitecture profiling |
 | One abstraction, many impls | the `OrderBook` trait is the product; the differential oracle proves the four instances identical, so no logic is duplicated (§3) |
-| Honesty is the signal | the real-data inversion, the SortedVec=memory-bound refutation, the ring's true-sharing throughput decline, and the PMU-unavailable-but-rigorous analysis are featured, not hidden (§1, [`BENCHMARKS.md`](BENCHMARKS.md) §7) |
+| Honesty is the signal | the real-data inversion, the SortedVec=memory-bound refutation (PMU-free-predicted, then confirmed at 50.5 % AMD backend-bound-memory / 0.1 % bad-spec), the ring's true-sharing throughput decline (now measured via `perf c2c`) are featured, not hidden (§1, [`BENCHMARKS.md`](BENCHMARKS.md) §7) |
 | Simple and fast beats clever | the zero-`unsafe` atomic-payload seqlock/ring over the `UnsafeCell` + memcpy shortcut — sound and measured at the clock floor, no cleverness the telemetry did not justify (§5.3) |
 | Scope discipline | phase specs + a `CLAUDE.md` guardrail; `book` frozen at `book-v1-frozen`; one session = one deliverable, ends green + commit |
 

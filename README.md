@@ -13,21 +13,27 @@ what lost.
 ## Headline numbers
 
 All sourced to [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md), re-derived from committed CSVs
-under `bench/results/`. Host: Intel i5-1135G7, `powersave`, pinned, `target-cpu=native`
-(`bench/results/env.json`).
+under `bench/results/`. Hardware-fidelity-dependent numbers were re-run on rented AMD EPYC
+bare metal (Latitude.sh `m4.metal.large`, EPYC 9254, 24c/48t, 4 CCDs × private 32 MiB L3,
+`performance` governor, kernel 6.8.0-124, `target-cpu=native`, `bench/results/env.json`) —
+anyone can rent this exact SKU hourly and re-run.
 
-- **The "obviously optimal" flat array loses by ~254× on real market data.** On the real
-  BTCUSDT replay `FlatBook` costs **10,926 ns/event** while `BTreeBook` leads at **43
-  ns/event** — yet `FlatBook` wins every synthetic profile (8.85 ns/event on `steady`).
-  The cause is one number: the real book's per-side span is **~88 MiB, ~11× the 8 MiB
-  LLC** (`throughput.csv`, `flat_memory.csv`).
-- **The data-structure crossover is locality-gated, not depth-gated:** `D*=256` when
-  touches concentrate at the top of book, `D*=2` when they spread uniformly
+- **The "obviously optimal" flat array loses by ~288× on real market data.** On the real
+  BTCUSDT replay `FlatBook` costs **10,896 ns/event** while `BTreeBook` leads at **37.79
+  ns/event** — yet `FlatBook` wins every synthetic profile (7.46 ns/event on `steady`).
+  The cause is one number: the real book's per-side span is **~88 MiB, ~2.74× the 32 MiB
+  per-CCD L3** — the inversion held even against a cache 4× the laptop's (`throughput.csv`,
+  `flat_memory.csv`).
+- **The data-structure crossover is locality-gated, not depth-gated:** under uniform touches
+  a linear scan loses to the binary search by depth ≈64 and degrades to 519 ns vs 29 ns
+  (~18×) at depth 2048; under top-concentrated touches it never loses within the swept range
   (`service_sweep.csv`).
-- **Seqlock read ~11 ns p50, writer latency flat across reader count** (`seqlock_read.csv`);
-  **SPMC ring push/recv 7–10 ns p50** (`ring_bench.csv`).
-- **End-to-end pipeline floor ~110–140 ns p50** (production → consumption,
-  coordinated-omission-correct, `e2e.csv`).
+- **SortedVec is memory-bound, not speculation-bound — PMU-free-predicted, then confirmed on
+  native AMD Zen 4 counters:** **50.5 % backend-bound-memory / 0.1 % bad-speculation /
+  0.04 % branch-miss** (`perf/perf_sorted.txt`).
+- **Seqlock read ~10 ns p50, writer latency flat across reader count** (`seqlock_read.csv`);
+  **SPMC ring push/recv ~10 ns p50**, true-sharing on the write cursor confirmed by
+  `perf c2c` cross-CCD HITM (`ring_bench.csv`, `perf/c2c_ring.txt`).
 
 ## Architecture
 
@@ -62,20 +68,25 @@ Five crates, one acyclic graph rooted at the frozen `book`: `book` (sans-IO core
 - **A frozen sans-IO core with a differential oracle** — four implementations proven
   observationally identical (`book/tests/oracle.rs`), then frozen at `book-v1-frozen` and
   driven by every harness unmodified.
-- **A top-down microarchitecture teardown** — each implementation's bottleneck identified
-  from behavioral signatures ([`docs/PROFILING.md`](docs/PROFILING.md)).
+- **A top-down microarchitecture teardown** — each implementation's bottleneck predicted
+  from PMU-free behavioral signatures on a laptop, then confirmed against native AMD Zen 4
+  pipeline-utilization counters on rented EPYC bare metal ([`docs/PROFILING.md`](docs/PROFILING.md)).
 
 ## Honest findings featured, not hidden
 
 - **The real-data inversion** above: `FlatBook`'s `O(1)` index is fastest on a narrow
-  synthetic book and last by ~254× on the wide real one, because its span blows the cache.
+  synthetic book and last by ~288× on the wide real one, because its span blows the cache.
   The tradeoff and the failure are the same number.
-- **A refuted hypothesis:** `SortedVecBook` was predicted to be misprediction-bound. It is
-  not — `std::partition_point` is already branchless on this toolchain (flat across key
-  predictability, `branch_experiment.csv`); the sorted book is memory-bound by its
-  dependent-load chain.
-- **Hardware counters were unavailable** on the host; the analysis stands PMU-free on
-  behavioral signatures, and no counter is fabricated ([`docs/PROFILING.md`](docs/PROFILING.md) §1).
+- **A refuted hypothesis, hardware-confirmed:** `SortedVecBook` was predicted to be
+  misprediction-bound. It is not — `std::partition_point` is already branchless on this
+  toolchain (`branch_experiment.csv`), and the EPYC AMD counters close it: 0.1 %
+  bad-speculation, 50.5 % backend-bound-memory (`perf/perf_sorted.txt`). Memory-bound, not
+  speculation-bound.
+- **PMU-free predicted, AMD-counter confirmed:** the laptop denied hardware counters
+  (`perf_event_paranoid = 4`) so the microarchitecture analysis stood on behavioral
+  signatures; the rented EPYC box exposed the native AMD Zen 4 PMU and confirmed every
+  category — predicted-then-confirmed, not either half alone
+  ([`docs/PROFILING.md`](docs/PROFILING.md)).
 
 ## Build / test / run / reproduce
 
