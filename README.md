@@ -1,7 +1,7 @@
 # Low-latency limit-order-book engine
 
-[![CI](https://github.com/umangPokhriyall/Web3-Terminal/actions/workflows/ci.yml/badge.svg)](https://github.com/umangPokhriyall/Web3-Terminal/actions/workflows/ci.yml)
-[![unsafe: forbidden](https://img.shields.io/badge/unsafe-forbidden-success.svg)](https://github.com/umangPokhriyall/Web3-Terminal)
+[![CI](https://github.com/umangPokhriyall/low-latency-lob/actions/workflows/ci.yml/badge.svg)](https://github.com/umangPokhriyall/low-latency-lob/actions/workflows/ci.yml)
+[![unsafe: forbidden](https://img.shields.io/badge/unsafe-forbidden-success.svg)](https://github.com/umangPokhriyall/low-latency-lob)
 [![license: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 
 A single-symbol limit-order-book engine built as falsifiable proof-of-work: four
