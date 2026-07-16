@@ -1,11 +1,11 @@
 # `feed` — deterministic event source (corpus · replay · synthetic · recorder)
 
-`feed` is the Phase 3 deliverable: a committed binary **corpus** format, a
+`feed` provides a committed binary **corpus** format, a
 deterministic allocation-free **replay** source, a seeded **synthetic** load
 generator (steady / burst / flash-crash), and a feature-gated, quarantined
 **recorder** that captures a real Binance session into a corpus.
 
-It sits above the frozen `book` core (tag `book-v1-frozen`) and below the Phase 4
+It sits above the frozen `book` core (tag `book-v1-frozen`) and below the
 `bench` harness. Everything `feed` hands downstream is **integer ticks** — no
 floats, no `String`s, no async, no clock. `#![forbid(unsafe_code)]` holds across
 the whole crate, including the recorder binary.
@@ -44,7 +44,7 @@ field-by-field — portable across architectures and sound on corrupt input.
 | 33     | `kind` | `u8`      | `0 = Level`, `1 = Trade`, `2 = Clear`         |
 | 34     | `pad`  | `[u8; 6]` | written as zero; ignored on read              |
 
-`record_size = 40 = size_of::<BookEvent>()` (asserted frozen in Phase 1), so
+`record_size = 40 = size_of::<BookEvent>()` (asserted against the frozen event model), so
 `count = (file_len - 32) / 40` is exact.
 
 ### Loading is safe, validated deserialization — not mmap-and-transmute
@@ -65,7 +65,7 @@ Corrupt input fails loudly with a specific `CorpusError`: `BadMagic`,
 
 `feed` never sleeps, paces, or reads the clock. It hands the harness the ordered
 events and their recorded `ts`; **open-loop arrival pacing and coordinated-omission
-correctness are Phase 4's job.** A given `.mdf` replays to an identical event
+correctness are the `bench` harness's job.** A given `.mdf` replays to an identical event
 sequence on every run and every machine.
 
 ---
@@ -163,6 +163,6 @@ real capture with its scales and timestamps.
 | `src/bin/gen.rs`     | default-feature CLI; writes the canonical synthetic corpora |
 | `src/bin/recorder.rs`| feature-gated async Binance recorder (quarantined) |
 
-After Phase 3, `feed` provides deterministic, integer-tick event sequences. Next
-is Phase 4 (`bench`: the open-loop, coordinated-omission-correct shootout that
-finally measures the four books).
+`feed` provides deterministic, integer-tick event sequences; `bench` is the
+open-loop, coordinated-omission-correct shootout that measures the four books
+on them.

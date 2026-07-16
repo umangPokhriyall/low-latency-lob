@@ -1,14 +1,14 @@
 # `book` v1 — FROZEN
 
-**Frozen:** 2026-06-03, as the final act of Phase 2, after the differential oracle
+**Frozen:** 2026-06-03, after the differential oracle
 (`tests/oracle.rs`) went green across the hand-verified scenario, 8 seeds × 50,000
 generated events, and every enumerated adversarial edge case.
 
 **Tag:** `book-v1-frozen`
 
 `book` is the sans-IO limit-order-book core — the stable contract every later phase
-(the Phase 4 sweep, the Phase 6/7 primitives, the Phase 8 engine) builds on. It is now
-immutable, exactly as the Rust-Tcp-Server `core` drove all eleven server models unchanged.
+(the benchmark sweeps, the concurrency primitives, the engine) builds on. It is now
+immutable.
 
 ## Frozen files (immutable)
 
@@ -31,14 +31,14 @@ immutable, exactly as the Rust-Tcp-Server `core` drove all eleven server models 
 - `RevVecBook` — contiguous `Vec`, best-first storage, located by linear scan.
 - `FlatBook` — flat per-side price-tick array indexed by `tick - base`; O(1)
   direct-index update, cached best with a removal probe, O(1) `depth` via occupied
-  counters, lazy init + recenter/grow. **Additive (Phase 5); NOT frozen.**
+  counters, lazy init + recenter/grow. **Additive; NOT frozen.**
 
 The oracle proves these are **observationally identical** after every event for any
 input sequence; internal representation differs, observable behaviour does not.
 
-## The additive Phase 5 edit (exercised)
+## The additive FlatBook edit (exercised)
 
-The **only** permitted modification to `book` after the freeze is Phase 5's flat-array
+The **only** permitted modification to `book` after the freeze is the flat-array
 implementation, now landed:
 
 1. a **new** file `src/flat.rs` (`FlatBook`),

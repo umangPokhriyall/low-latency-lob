@@ -3,8 +3,8 @@
 This is the complete four-implementation verdict (`BTreeBook`, `SortedVecBook`, `RevVecBook`,
 `FlatBook`), built **only** from the committed CSVs under `bench/results/`. Every number cites
 its CSV inline with units and conditions; nothing here is computed by hand from anything else.
-It is the analytical close-out of the shootout, not the publishable `docs/BENCHMARKS.md`
-(Phase 10).
+It is the analytical close-out of the shootout; the consolidated writeup is
+`docs/BENCHMARKS.md`.
 
 The four implementations sit behind one frozen `OrderBook` trait and were proven
 observationally identical by the differential oracle (`book/tests/oracle.rs`, four-way on the
@@ -42,7 +42,7 @@ floor is reported and **never subtracted** — values at or below it are not res
 
 - **Timer floor (7 ns).** `best_bid` and shallow-depth `update` results sit at or just above the
   floor; differences there are not resolvable and are reported as such, not as wins.
-- **Governor.** Phase 4 ran `powersave`; Phase 5 re-ran under `powersave` as well (the host has
+- **Governor.** The service sweep ran `powersave`; the real-data study re-ran under `powersave` as well (the host has
   no passwordless route to set `performance`, recorded in `env.json`). Frequency scaling adds
   noise; it surfaces as occasional single-run p99/max outliers (e.g. `flat`/`uniform` `top_n_full`
   at depth 2048 carries a `max` of 2,385,919 ns against a 1,990 ns p50, `read_path.csv`). These
@@ -320,6 +320,6 @@ cargo build --release -p bench
 ```
 
 Conditions for every result above are the `env.json` manifest: i5-1135G7, `powersave` governor,
-pinned core 0, `target-cpu=native`, 7 ns clock floor. With Phase 5 the order-book shootout is
-complete: four implementations behind one frozen trait, proven identical, measured honestly, and
+pinned core 0, `target-cpu=native`, 7 ns clock floor. With `FlatBook` the order-book shootout is
+complete: four implementations behind one frozen trait, proven identical, measured, and
 judged with a sourced verdict.

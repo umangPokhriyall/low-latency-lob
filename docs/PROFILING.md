@@ -1,8 +1,8 @@
 # PROFILING.md — Top-Down Microarchitecture Teardown of the `apply` Hot Loop
 
 This document explains, at the level the CPU executes, *why* the four frozen
-order-book implementations land where they did in the Phase 4 service-time
-crossover and the Phase 5 real-data verdict. The story is **predicted-then-confirmed**:
+order-book implementations land where they did in the service-time
+crossover and the real-data verdict. The story is **predicted-then-confirmed**:
 the taxonomy was first established on a laptop with *no hardware counters*, from
 unambiguous behavioral signatures, and then **confirmed on a rented AMD EPYC box against
 native Zen 4 pipeline-utilization counters**. Both halves are kept — the PMU-free
@@ -112,7 +112,7 @@ step this teardown dissects:
 | `RevVecBook` | linear scan from the best end | one array/side |
 | `FlatBook` | direct index `bid_qty[px - base]` | one dense array/side spanning the price range |
 
-The Phase 9 `bench profile` subcommand isolates this: it builds a book at a chosen
+The `bench profile` subcommand isolates this: it builds a book at a chosen
 depth (untimed), warms up, then runs `--iters` `apply` calls over a pre-generated
 event buffer in a tight, **untimed** loop, each call wrapped in `black_box`, with no
 per-op timing — so an external profiler attributes cycles to `apply` cleanly. On the EPYC
@@ -124,7 +124,7 @@ wrapped in perf, so the latency CSVs carry no profiling overhead.
 
 ## 3. The taxonomy, confirmed by AMD counters (and one hypothesis refuted)
 
-The Phase 9 hypotheses (phase9-spec §2.1), the PMU-free prediction, and the AMD-counter
+The initial hypotheses, the PMU-free prediction, and the AMD-counter
 verdict:
 
 | Impl | Predicted dominant category | AMD Zen 4 verdict (`perf/perf_*.txt`) |
@@ -145,7 +145,7 @@ The full AMD Zen 4 pipeline-utilization capture (depth 2048, uniform, 200 M iter
 
 ### `SortedVecBook` — predicted Bad Speculation, **measured Memory Bound**
 
-The frozen `SortedVecBook` locates with `Vec::binary_search_by_key`. The Phase 9 branch
+The frozen `SortedVecBook` locates with `Vec::binary_search_by_key`. The branch
 experiment showed that `std`'s binary-search family compiles to **branchless** code on this
 toolchain: the `std` variant in `branch_experiment.csv` (laptop) is flat across key
 predictability — at depth 16, 3.118 ns predictable vs 3.118 ns random. A branchless locate
@@ -244,7 +244,7 @@ misprediction penalty proper (the branchy random−predictable gap). The
 correctness test `branchless_lower_bound_matches_partition_point` is green) and reproduces
 its flat profile.
 
-A note recorded for honesty: the phase9-spec §4 wrote the branchless step as the ternary
+A note: the original experiment plan wrote the branchless step as the ternary
 `base = if arr[mid] < key { mid } else { base }`. On this toolchain LLVM lowered *that form,
 and an arithmetic-select rewrite, back to a conditional jump* — re-introducing the very
 misprediction the variant exists to avoid. Only `std::hint::select_unpredictable` (stable
@@ -254,7 +254,7 @@ experiment names the primitive that achieves it.
 
 ### 4.3 Freeze + FlatBook framing
 
-The frozen core is **not** changed, for two reasons stated in phase9-spec §4. First, the
+The frozen core is **not** changed, for two reasons. First, the
 freeze doctrine: `book` drives every variant and harness unmodified. Second, the real-data
 verdict already chose `BTreeBook` for the wide book and `FlatBook` for the bounded one, and
 `FlatBook`'s direct index is the **structural branchless answer**: it does not do a search at
@@ -357,7 +357,7 @@ effect).
 
 ## 7. Closing the loop — the prior numbers, mechanistically
 
-### 7.1 The Phase 4 crossover is locality-gated retired work
+### 7.1 The crossover is locality-gated retired work
 
 `service_sweep.csv` (update p50, EPYC) shows, under **uniform** touches, `RevVecBook`
 climbing 9 ns (depth 2) → 79 (256) → 259 (1024) → **519 ns (depth 2048)**, while
@@ -370,7 +370,7 @@ keep to 1–2 and uniform touches spread to ≈depth/2. It is retired work, not 
 (bad-spec 1.3 %) and not cache (cache-miss 0.04 %). `SortedVecBook`'s O(log depth) branchless
 dependent-load chain and `FlatBook`'s O(1) direct index are depth-robust → flat.
 
-### 7.2 The Phase 5 real-data inversion is the memory hierarchy meeting book width
+### 7.2 The real-data inversion is the memory hierarchy meeting book width
 
 `throughput.csv` (EPYC), ns/event:
 
@@ -401,8 +401,8 @@ story, not an instruction-count one.
 
 ### 7.3 Summary
 
-Measure, then explain, then confirm. The Phase 4 crossover is retired instruction count
-gated by touch locality (`RevVecBook`, 93.8 % retiring). The Phase 5 inversion is the memory
+Measure, then explain, then confirm. The crossover is retired instruction count
+gated by touch locality (`RevVecBook`, 93.8 % retiring). The real-data inversion is the memory
 hierarchy gated by book width (`FlatBook`'s span vs `BTreeBook`'s level-proportional nodes).
 The bad-speculation bullet the binary search would have paid is real and quantified (≈29 ns
 at L1-resident depth 256, `branch_experiment.csv`) but already dodged — structurally by
@@ -442,13 +442,13 @@ perf c2c record -o bench/results/perf/c2c_ring.data -- <ring contention pass>
 perf c2c report -i bench/results/perf/c2c_ring.data --stdio > bench/results/perf/c2c_ring.txt
 #   (and c2c_seqlock for the seqlock)
 
-# Phase 9 PMU-free behavioral experiments (laptop baseline; the prediction the counters confirm).
+# PMU-free behavioral experiments (laptop baseline; the prediction the counters confirm).
 ./target/release/bench branch-exp --core 0      # -> bench/results/branch_experiment.csv
 ./target/release/bench cache-exp  --core 0      # -> bench/results/cache_experiment.csv
 
 # Prior-phase inputs this teardown explains (EPYC re-run).
-./target/release/bench service       # -> service_sweep.csv   (Phase 4 crossover)
-./target/release/bench throughput    # -> throughput.csv      (Phase 5 real-data)
+./target/release/bench service       # -> service_sweep.csv   (the crossover)
+./target/release/bench throughput    # -> throughput.csv      (the real-data study)
 ./target/release/bench flatmem       # -> flat_memory.csv     (FlatBook span, host-independent)
 
 # Figures (reads only the committed CSVs).

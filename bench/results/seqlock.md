@@ -1,8 +1,8 @@
 # Seqlock read latency under write contention — interim findings (Benchmark 5)
 
-This is the interim findings note for the `sync::SeqLock` snapshot cell (Phase 6, §6), built
+This is the interim findings note for the `sync::SeqLock` snapshot cell, built
 **only** from the committed `bench/results/seqlock_read.csv`. Every number below cites that CSV
-with its units and conditions; nothing is computed by hand. It is not the Phase 10 writeup.
+with its units and conditions; nothing is computed by hand. The consolidated writeup is `docs/BENCHMARKS.md`.
 
 The seqlock is the engine's single-writer / many-reader top-of-book snapshot: one writer mutates
 the book and publishes a `TopOfBook` via a version counter; many readers take an optimistic

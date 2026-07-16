@@ -121,10 +121,8 @@ benchmark differences are pure performance, not behavior.
 **The freeze.** `book` was frozen after the oracle passed (git tag `book-v1-frozen`); its
 six source files carry a "FROZEN — do not modify" header. New implementations are additive
 (new file, new export, extend the oracle), never edits to the trait or the existing
-structures. From that point the frozen core drove the Phase 3 feed, the Phase 4–5
-benchmark sweeps, the Phase 8 engine, and the Phase 9 profiling harness **unmodified** —
-the same discipline that, in an earlier project, let one frozen protocol core drive eleven
-server I/O models from blocking to io_uring without a line changed. A core you cannot stop
+structures. From that point the frozen core drove the feed, the benchmark sweeps,
+the engine, and the profiling harness **unmodified**. A core you cannot stop
 editing is a core you have not actually specified.
 
 ---
@@ -301,9 +299,9 @@ Each NORTH-STAR engineering principle maps to a specific decision in this repo:
 | Distributions, not averages | every benchmark reports p50/p99/p99.9 + histograms (`.hgrm`); the CO-correct sustained/e2e tail is where saturation shows |
 | Mechanical sympathy | thread pinning (producer on one CCD-0 core, readers across CCDs), cache-line-aligned ring slots (`align(64)`, validated by the EPYC 64 B line + `perf c2c`), the recorded clock floor (~10 ns EPYC), `target-cpu=native` for valid microarchitecture profiling |
 | One abstraction, many impls | the `OrderBook` trait is the product; the differential oracle proves the four instances identical, so no logic is duplicated (§3) |
-| Honesty is the signal | the real-data inversion, the SortedVec=memory-bound refutation (PMU-free-predicted, then confirmed at 50.5 % AMD backend-bound-memory / 0.1 % bad-spec), the ring's true-sharing throughput decline (now measured via `perf c2c`) are featured, not hidden (§1, [`BENCHMARKS.md`](BENCHMARKS.md) §7) |
+| Report negative results | the real-data inversion, the SortedVec=memory-bound refutation (confirmed at 50.5 % AMD backend-bound-memory / 0.1 % bad-spec), and the ring's true-sharing throughput decline (measured via `perf c2c`) are documented alongside the wins (§1, [`BENCHMARKS.md`](BENCHMARKS.md) §7) |
 | Simple and fast beats clever | the zero-`unsafe` atomic-payload seqlock/ring over the `UnsafeCell` + memcpy shortcut — sound and measured at the clock floor, no cleverness the telemetry did not justify (§5.3) |
-| Scope discipline | phase specs + a `CLAUDE.md` guardrail; `book` frozen at `book-v1-frozen`; one session = one deliverable, ends green + commit |
+| Freeze the core | `book` frozen at `book-v1-frozen`; later work builds on it additively |
 
 ---
 

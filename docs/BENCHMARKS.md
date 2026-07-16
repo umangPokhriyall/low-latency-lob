@@ -77,7 +77,7 @@ The hardware-fidelity-dependent numbers come from one rented bare-metal host, re
 | CPU governor | **`performance`** (amd-pstate) (`env.json`) |
 | OS / kernel | Ubuntu 24.04 LTS, kernel **6.8.0-124-generic** (`env.json`) |
 | rustc | **1.96.1**, `-C target-cpu=native` (`env.json`) |
-| pinning | LOB producer pinned to **one dedicated CCD-0 core** (`pinned_core: 0`); Phase 6/7 readers/consumers spread **across CCDs** to surface cross-CCD coherence traffic |
+| pinning | LOB producer pinned to **one dedicated CCD-0 core** (`pinned_core: 0`); seqlock/ring readers/consumers spread **across CCDs** to surface cross-CCD coherence traffic |
 | clock read-read floor | **~10 ns** (`clock_overhead_ns`; 9–10 ns across the metal CSVs) |
 
 **Reproducibility as a first-class claim.** This host is not a bespoke lab machine: anyone
@@ -85,7 +85,7 @@ can rent this exact SKU (`m4.metal.large`, EPYC 9254) hourly from Latitude.sh an
 the suite in a handful of dollars. That is a stronger reproducibility guarantee than a
 whole-host cloud metal instance nobody can afford to replicate. The per-CCD private L3 is
 the load-bearing topology fact: pinning the producer to one CCD-0 core gives it a private
-32 MiB L3 and its own execution ports, and spreading the Phase 6/7 readers across the other
+32 MiB L3 and its own execution ports, and spreading the seqlock/ring readers across the other
 CCDs maximizes the cross-CCD coherence traffic that `perf c2c` (§4.2) is there to observe.
 The single-socket, intra-socket-Infinity-Fabric caveat is the only residual (§7).
 
@@ -140,7 +140,7 @@ under ~10 ns between cells are read as ties at the floor, not as wins.
   nanoseconds are not comparable to the archived laptop baseline — the EPYC 9254 @ 2.9 GHz
   is a different machine; the qualitative verdicts (which structure when, writer wait-free,
   zero `unsafe`, CO-correct method) are properties of the code and method, not the host.
-- *The single residual caveat:* one socket, loopback. The Phase 6/7 cross-core traffic is
+- *The single residual caveat:* one socket, loopback. The seqlock/ring cross-core traffic is
   **intra-socket, cross-CCD over Infinity Fabric**, not inter-socket. This is strictly more
   local than a two-socket box, and orthogonal to every pipeline bucket — but it is the one
   topology limitation to state plainly.
@@ -419,8 +419,8 @@ column) — tracking the producer-throughput decline below.
 **The true-sharing reality, reported not engineered around:** at the saturated operating
 point (100 M eps target) producer throughput is **20.60 → 16.98 → 12.74 Mev/s at K=1,2,4**
 (`e2e.csv`), a ~38% decline. This is the same true-sharing-on-the-write-cursor effect
-isolated in §4.2 and now **directly observed on EPYC via `perf c2c`** (§4.2). Phase 8
-measures and reports it; it does not modify the verified `sync` primitives to chase it. The
+isolated in §4.2 and now **directly observed on EPYC via `perf c2c`** (§4.2). The engine
+benchmark measures and reports it; it does not modify the verified `sync` primitives to chase it. The
 pipeline's `overrun_rate` is 0.000000 in every cell — the consumer step is cheaper than the
 producer step, so under load the cost is schedule backlog (coordinated omission), not ring
 lapping; the overrun→resync composition is exercised where the producer genuinely outruns a
@@ -517,7 +517,7 @@ These are featured, not buried — they are what makes the work checkable.
   both lock-free primitives are verified by loom models and corroborated by real-thread
   stress tests. Concurrent shared mutation is expressed with atomics, the sound tool under
   Rust's memory model, rather than `UnsafeCell`.
-- **The residual caveat, stated.** Single socket, loopback: the Phase 6/7 cross-core
+- **The residual caveat, stated.** Single socket, loopback: the seqlock/ring cross-core
   coherence traffic is intra-socket, cross-CCD over Infinity Fabric, not inter-socket —
   strictly more local than a two-socket box and orthogonal to every pipeline bucket, but the
   one topology limitation. The archived laptop (i5-1135G7) baseline remains the historical
@@ -543,7 +543,7 @@ every number from them. The exact regeneration commands are in §2. Per-claim pr
 | ring push/recv latency, throughput, overrun | `ring_bench.csv` | EPYC |
 | AMD Zen4 pipeline utilization (per impl) | `perf/perf_{btree,sorted,rev,flat}.txt` | EPYC |
 | cache-line contention (HITM, true vs false sharing) | `perf/c2c_ring.txt`, `perf/c2c_seqlock.txt` | EPYC |
-| end-to-end latency, saturation, true sharing | `e2e.csv` | **laptop baseline** (Phase 8 not re-run) |
+| end-to-end latency, saturation, true sharing | `e2e.csv` | **laptop baseline** (not re-run on EPYC) |
 | misprediction 2×2, branchless elimination | `branch_experiment.csv` | **laptop baseline** (PMU-free behavioral) |
 | cache-footprint latency curve | `cache_experiment.csv` | **laptop baseline** (PMU-free behavioral) |
 | environment, corpora fingerprints, clock floor | `env.json` | EPYC |

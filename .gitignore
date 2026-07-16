@@ -8,3 +8,7 @@ CLAUDE.md
 .DS_Store
 /docs/x-thread.md
 NORTH-STAR.md
+# Internal development documents live in ../repo-internal/ and are never shipped.
+STATE.md
+docs/SELF-AUDIT.md
+docs/legacy-reference/

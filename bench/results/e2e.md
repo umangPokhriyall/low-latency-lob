@@ -1,8 +1,8 @@
 # End-to-end production-to-consumption latency — interim findings (Benchmark 7)
 
-This is the interim findings note for the assembled `engine` pipeline (Phase 8, §5–§6), built
+This is the interim findings note for the assembled `engine` pipeline, built
 **only** from the committed `bench/results/e2e.csv`. Every number below cites that CSV with its units
-and conditions; nothing is computed by hand. It is not the Phase 10 writeup.
+and conditions; nothing is computed by hand. The consolidated writeup is `docs/BENCHMARKS.md`.
 
 The pipeline is the first assembly of all the verified parts into one hot path: a pinned producer
 replays a corpus through `EngineProducer::<BTreeBook>::process` — `book.apply` →
@@ -53,7 +53,7 @@ run) and a synthetic fixed-rate sweep over `steady-s1-100k.mdf` to saturation.
 
 ## 2. Real-corpus headline (BTCUSDT, speed 1)
 
-`schedule = real`, 13 765 events, ~304 eps natural arrival. The producer applies BTreeBook (the Phase 5
+`schedule = real`, 13 765 events, ~304 eps natural arrival. The producer applies BTreeBook (the
 real-data champion) and broadcasts; consumers measure full-pipeline latency. (`e2e.csv`, `samples` =
 `13765 × K`.)
 
@@ -113,9 +113,9 @@ write cursor: every `Consumer::try_recv` issues an `Acquire` load of the produce
 how far the stream has advanced, so the cache line holding `write.v` ping-pongs between the producer
 (which writes it once per push) and every consumer (which reads it). It is **not false sharing** — the
 ring slots are `#[repr(align(64))]`, one slot per cache line, and `WritePos` sits alone on its own
-line (Phase 7 proved the slot/cursor isolation, and `ring_bench.csv` shows the *push op itself* stays
+line (the ring's stress tests proved the slot/cursor isolation, and `ring_bench.csv` shows the *push op itself* stays
 flat across K). The cost here is the single, genuinely-shared progress counter that a broadcast bus
-with independent cursors inherently needs. Phase 8 measures and reports this honestly; it does **not**
+with independent cursors inherently needs. This is measured and reported; it does **not**
 modify the verified `sync` primitives to chase it.
 
 Plots (each cites `e2e.csv`):
@@ -144,8 +144,7 @@ records, cutting the ping-pong pressure on the producer's write line at the cost
 "is there new data" visibility. That is a batched `recv` path in the verified ring, so it would need
 its own loom + stress re-verification and is out of scope for the assembly phase. It is the measure-
 first, optimize-with-evidence discipline in action: **this benchmark produced the number that would
-justify the change**, and it is a direct input to the flagship's output-multiplexer design (the ring is
-the flagship's guest-output broadcast bus in miniature).
+justify the change**.
 
 ## 7. Honest caveats
 
@@ -155,5 +154,5 @@ the flagship's guest-output broadcast bus in miniature).
   {1, 2, 4} is the evidence, and the slope is monotone.
 - The real-corpus p99 reflects the **captured feed's batching**, not a pipeline limit (§2); the
   synthetic sweep is where the pipeline's own saturation is measured (§3).
-- This is the interim note. The Phase 9 microarchitecture profiling and the Phase 10 consolidated
-  `BENCHMARKS.md` are where these numbers are cross-checked against counters and written up in full.
+- This is the interim note. `docs/PROFILING.md` and the consolidated
+  `docs/BENCHMARKS.md` are where these numbers are cross-checked against counters and written up in full.

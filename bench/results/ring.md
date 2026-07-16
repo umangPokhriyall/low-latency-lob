@@ -1,8 +1,8 @@
 # SPMC broadcast ring — throughput, latency & false-sharing — interim findings (Benchmark 6)
 
-This is the interim findings note for the `sync::SpmcRing` broadcast bus (Phase 7, §6), built
+This is the interim findings note for the `sync::SpmcRing` broadcast bus, built
 **only** from the committed `bench/results/ring_bench.csv`. Every number below cites that CSV with
-its units and conditions; nothing is computed by hand. It is not the Phase 10 writeup.
+its units and conditions; nothing is computed by hand. The consolidated writeup is `docs/BENCHMARKS.md`.
 
 The ring is the engine's single-producer / many-independent-consumer output bus: one writer streams
 `[u64; W]` records and **never blocks** (it overwrites on wrap), and each consumer reads the *whole*
@@ -99,7 +99,7 @@ line) and is confirmed by the flat per-op latencies (§2) and by the **flat `rec
 verdict: **the ring is false-sharing-free, but its broadcast throughput is bounded by true-sharing
 coherence traffic on the write cursor, declining ~2.5× from 1 to 4 consumers.** (A future
 optimisation — consumers caching the producer position and re-reading it less often, or the producer
-publishing it on a coarser cadence — would relax this; it is out of scope for the frozen Phase 7
+publishing it on a coarser cadence — would relax this; it is out of scope for the frozen
 primitive. The plot `plots/ring_producer_throughput_vs_consumers.svg` shows the curve.)
 
 The producer **completes its full budget at every K** — it is **wait-free** and never blocks on a
@@ -127,7 +127,7 @@ prove no torn or duplicated record ever escapes.
 `paced` is the realistic market-data regime: at a 1 MHz feed every consumer trivially keeps pace and
 overrun is **≈ 0** (the small residual at `K ∈ {1,2}` is the untimed warm-up burst briefly lapping a
 just-started consumer before steady state; `K = 4` records exactly 0.000). This is the **lossless
-broadcast** the engine relies on, and it composes with the Phase 6 seqlock: a consumer that *does* get
+broadcast** the engine relies on, and it composes with the seqlock: a consumer that *does* get
 lapped under a burst detects the overrun and resyncs its derived state from the seqlock top-of-book
 snapshot before resuming from the ring's oldest resident position.
 
