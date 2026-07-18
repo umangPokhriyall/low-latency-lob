@@ -1,57 +1,16 @@
 # BENCHMARKS — a low-latency limit-order-book engine, measured
 
-This is the consolidated, sourced benchmark writeup for the engine: four order-book
-implementations behind one frozen trait, two lock-free concurrency primitives, and the
-assembled production-to-consumption pipeline. Every number below is re-derived from a
-committed CSV under `bench/results/` and cited inline; nothing is computed by hand from
-anything else, and nothing is invented. Where a hypothesis was refuted, the refutation
-is stated with the number that refutes it. The microarchitecture mechanisms are
-summarized here and treated in full — now with native AMD Zen4 hardware counters — in
-[`PROFILING.md`](PROFILING.md).
+This document reports the benchmark results for the order-book implementations, lock-free concurrency primitives, and the assembled engine. Every reported figure is derived from committed benchmark artifacts under bench/results/, making the results reproducible rather than illustrative. Architectural design is covered in ARCHITECTURE.md; microarchitectural analysis lives in PROFILING.md.
 
-**Provenance note (read once, then trust the citations).** The hardware-fidelity-dependent
-measurements were re-run on a single rented AMD EPYC bare-metal box (below), and every
-per-op latency, throughput, and primitive number here is that EPYC dataset:
-`service_sweep.csv`, `read_path.csv`, `throughput.csv`, `sustained.csv`,
-`seqlock_read.csv`, `ring_bench.csv`, the AMD pipeline captures `perf/perf_*.txt`, and the
-cache-line-contention reports `perf/c2c_*.txt`. Two things are *not* host-dependent and are
-carried unchanged: `flat_memory.csv` records the book's price-**span** in ticks/bytes (a
-property of the corpus, identical on any host). Three timing datasets were **outside the
-metal re-run scope** (Phases 4/6/7/9) and remain the earlier laptop (Intel i5-1135G7)
-baseline — the two PMU-free behavioral experiments `branch_experiment.csv` and
-`cache_experiment.csv`, and the Phase-8 end-to-end pipeline `e2e.csv`; each is labeled as
-such at the point of use. The laptop baseline is referenced as historical context, never
-mixed into an EPYC claim.
-
----
+## Dataset provenance. Unless explicitly noted otherwise, all latency, throughput, and profiling results were collected on a dedicated AMD EPYC 9254 bare-metal host. Three historical experiments (branch_experiment.csv, cache_experiment.csv, and e2e.csv) remain from the earlier Intel development machine because they measure behavioral properties rather than hardware-specific performance. Every claim cites its originating artifact.
 
 ## 1. TL;DR
 
-- **The "obviously optimal" flat array loses by nearly two-and-a-half orders of magnitude
-  on real market data.** On the real BTCUSDT replay, `FlatBook` costs **10,896.43 ns/event**
-  while `BTreeBook` leads at **37.79 ns/event** — a **~288× loss** for the structure that
-  wins every synthetic profile (`throughput.csv`). The cause is one number: the real
-  book's per-side span is **92,049,312 bytes (≈88 MiB)**, **~2.74× the 32 MiB per-CCD L3**
-  (`flat_memory.csv`; the EPYC's per-CCD L3 is 32 MiB, so the inversion survives a cache
-  4× larger than the laptop's 8 MiB). The tradeoff and the failure are the same span.
-- **The data-structure crossover is locality-gated, not depth-gated.** Under uniform
-  touches a best-first linear scan (`RevVecBook`) pulls clear of the binary search
-  (`SortedVecBook`) by depth ≈64 and degrades to **519 ns vs 29 ns at depth 2048 (~18×)**;
-  under top-concentrated touches the same scan **never loses within the swept range** — it
-  holds 9–29 ns through depth 2048, at/near the ~10 ns clock floor (`service_sweep.csv`).
-  Depth alone does not determine the winner; where the touches land does.
-- **Both lock-free primitives are loom-verified with zero `unsafe` anywhere in the
-  workspace.** A contended seqlock read is **~10 ns p50** and the writer's store latency
-  is **flat across reader count** (`seqlock_read.csv`); the SPMC ring's `push`/`recv` sit
-  at **~10 ns p50** (`ring_bench.csv`). Every crate is `#![forbid(unsafe_code)]`.
-- **The microarchitecture analysis is now confirmed by native AMD Zen4 counters.** On the
-  laptop, hardware counters were denied and the top-down categories were *predicted* from
-  behavioral signatures. On the EPYC box (`perf_event_paranoid = -1`) the AMD Zen4
-  pipeline-utilization counters make the prediction hardware-fact: `SortedVecBook` is
-  **50.5 % backend-bound (memory) with 0.1 % bad-speculation** — memory-bound, not
-  speculation-bound (`perf/perf_sorted.txt`), exactly as the PMU-free method predicted.
-  This is the AMD architectural counterpart to Intel TMA, not Intel TMA relabeled
-  ([`PROFILING.md`](PROFILING.md)).
+- **Real data overturns synthetic wisdom:** `FlatBook` is **288×** slower than `BTreeBook`
+  because the real ladder spans **88 MiB**, exceeding a **Zen4 CCD's 32 MiB L3**.
+- **Data-structure crossover depends on touch locality, not depth.**
+- The seqlock and broadcast ring remain **~10 ns** while staying completely unsafe-free and loom verified.
+- Native AMD Zen4 counters confirm the earlier PMU-free analysis: SortedVecBook is memory-bound rather than branch-bound.
 
 **The one-line verdict — which structure when:** shallow and top-concentrated →
 `RevVecBook` or `SortedVecBook` (both at the timer floor); deep and spread →
@@ -67,23 +26,22 @@ depth, touch locality, and price-span boundedness.
 The hardware-fidelity-dependent numbers come from one rented bare-metal host, recorded in
 `bench/results/env.json`:
 
-| field | value |
-|---|---|
-| provider / SKU | Latitude.sh `m4.metal.large`, single socket, Ashburn (US-East) |
-| CPU | AMD EPYC 9254, 24 physical cores / 48 threads @ 2.9 GHz (Zen 4, Genoa) (`env.json`) |
-| chiplet topology | 4 CCDs, each with a **private 32 MiB L3** → **128 MiB aggregate L3**; 64 B cache line |
-| NUMA | booted **NPS1** → `numactl --hardware` reports **1 NUMA node**; per-CCD L3 isolation holds regardless of NPS |
-| RAM | 384 GiB |
-| CPU governor | **`performance`** (amd-pstate) (`env.json`) |
-| OS / kernel | Ubuntu 24.04 LTS, kernel **6.8.0-124-generic** (`env.json`) |
-| rustc | **1.96.1**, `-C target-cpu=native` (`env.json`) |
-| pinning | LOB producer pinned to **one dedicated CCD-0 core** (`pinned_core: 0`); seqlock/ring readers/consumers spread **across CCDs** to surface cross-CCD coherence traffic |
-| clock read-read floor | **~10 ns** (`clock_overhead_ns`; 9–10 ns across the metal CSVs) |
+| field                 | value                                                                                                                                                                |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| provider / SKU        | Latitude.sh `m4.metal.large`, single socket, Ashburn (US-East)                                                                                                       |
+| CPU                   | AMD EPYC 9254, 24 physical cores / 48 threads @ 2.9 GHz (Zen 4, Genoa) (`env.json`)                                                                                  |
+| chiplet topology      | 4 CCDs, each with a **private 32 MiB L3** → **128 MiB aggregate L3**; 64 B cache line                                                                                |
+| NUMA                  | booted **NPS1** → `numactl --hardware` reports **1 NUMA node**; per-CCD L3 isolation holds regardless of NPS                                                         |
+| RAM                   | 384 GiB                                                                                                                                                              |
+| CPU governor          | **`performance`** (amd-pstate) (`env.json`)                                                                                                                          |
+| OS / kernel           | Ubuntu 24.04 LTS, kernel **6.8.0-124-generic** (`env.json`)                                                                                                          |
+| rustc                 | **1.96.1**, `-C target-cpu=native` (`env.json`)                                                                                                                      |
+| pinning               | LOB producer pinned to **one dedicated CCD-0 core** (`pinned_core: 0`); seqlock/ring readers/consumers spread **across CCDs** to surface cross-CCD coherence traffic |
+| clock read-read floor | **~10 ns** (`clock_overhead_ns`; 9–10 ns across the metal CSVs)                                                                                                      |
 
-**Reproducibility as a first-class claim.** This host is not a bespoke lab machine: anyone
-can rent this exact SKU (`m4.metal.large`, EPYC 9254) hourly from Latitude.sh and re-run
-the suite in a handful of dollars. That is a stronger reproducibility guarantee than a
-whole-host cloud metal instance nobody can afford to replicate. The per-CCD private L3 is
+**Reproducibility as a first-class claim.** The experiments were performed on a commercially
+available bare-metal instance (Latitude.sh m4.metal.large), allowing the complete
+benchmark suite to be reproduced without proprietary hardware. The per-CCD private L3 is
 the load-bearing topology fact: pinning the producer to one CCD-0 core gives it a private
 32 MiB L3 and its own execution ports, and spreading the seqlock/ring readers across the other
 CCDs maximizes the cross-CCD coherence traffic that `perf c2c` (§4.2) is there to observe.
@@ -92,12 +50,12 @@ The single-socket, intra-socket-Infinity-Fabric caveat is the only residual (§7
 **Service time vs response time — kept strictly distinct.** Two of the questions a
 latency study asks are different, and conflating them is the classic measurement error:
 
-- *Service time* is the cost of the operation itself, with no arrival process and
+- _Service time_ is the cost of the operation itself, with no arrival process and
   therefore no coordinated omission. The service-sweep (`service_sweep.csv`), read-path
   (`read_path.csv`), and whole-corpus throughput (`throughput.csv`) benchmarks measure
   service time, as do the primitive micro-benchmarks (`seqlock_read.csv`,
   `ring_bench.csv`).
-- *Response time* is completion minus the **scheduled** arrival, under an open-loop
+- _Response time_ is completion minus the **scheduled** arrival, under an open-loop
   arrival process. The sustained (`sustained.csv`) and end-to-end (`e2e.csv`, laptop
   baseline) benchmarks measure response time and are **coordinated-omission-correct**: each
   event's latency is `completion − scheduled_arrival`, never `completion − apply_start`.
@@ -117,30 +75,31 @@ values. On this box p50s land on a coarse ~10 ns grid (9 / 19 / 29 … ns), so d
 under ~10 ns between cells are read as ties at the floor, not as wins.
 
 **Threats to validity — the resolved confounds and the one that remains.**
-- *Governor now pinned to `performance` on an isolated CCD → jitter-free tails.* The
+
+- _Governor now pinned to `performance` on an isolated CCD → jitter-free tails._ The
   laptop ran `powersave` on a shared, non-isolated host, and its tails carried scheduler
   jitter. On the EPYC box the producer owns a dedicated CCD-0 core at a fixed frequency, so
   the interior p99/p99.9 are clean; residual multi-ms `max` values (e.g. `seqlock_read.csv`
   `read_max_ns` up to ~6 ms) are isolated OS-deschedule events, reported and not
   attributed to the primitive.
-- *PMU now available → native AMD counters.* The laptop denied hardware counters
+- _PMU now available → native AMD counters._ The laptop denied hardware counters
   (`perf_event_paranoid = 4`); the microarchitecture story stood PMU-free. On the EPYC box
   (`perf_event_paranoid = -1`) the native AMD Zen4 pipeline-utilization counters were
   captured (`perf/perf_*.txt`) and **confirm** the PMU-free predictions
   ([`PROFILING.md`](PROFILING.md)). The stale laptop artifacts
   (`perf/perf_unavailable.txt`, `perf/perf_summary.csv`) are retained only as the record of
   that earlier condition.
-- *Inferred cache-line sharing now directly observed → `perf c2c` HITM.* On the laptop the
+- _Inferred cache-line sharing now directly observed → `perf c2c` HITM._ On the laptop the
   false-vs-true-sharing distinction was inferred from the `align(64)` layout and the
   throughput-decline curve. On the EPYC box `perf c2c` directly observes cross-CCD
   hit-modified (HITM) transfers (`perf/c2c_ring.txt`, `perf/c2c_seqlock.txt`), upgrading the
   attribution from inferred to measured (§4.2).
-- *Single host, `target-cpu=native`.* Binaries are host-specific by design (valid
+- _Single host, `target-cpu=native`._ Binaries are host-specific by design (valid
   microarchitecture profiling); the numbers do not transfer to another CPU. Absolute
   nanoseconds are not comparable to the archived laptop baseline — the EPYC 9254 @ 2.9 GHz
   is a different machine; the qualitative verdicts (which structure when, writer wait-free,
   zero `unsafe`, CO-correct method) are properties of the code and method, not the host.
-- *The single residual caveat:* one socket, loopback. The seqlock/ring cross-core traffic is
+- _The single residual caveat:_ one socket, loopback. The seqlock/ring cross-core traffic is
   **intra-socket, cross-CCD over Infinity Fabric**, not inter-socket. This is strictly more
   local than a two-socket box, and orthogonal to every pipeline bucket — but it is the one
   topology limitation to state plainly.
@@ -167,6 +126,8 @@ cargo build --release -p bench                  # target-cpu=native via .cargo/c
 
 ## 3. The order-book shootout
 
+This section compares the four order-book implementations under synthetic and real workloads, showing where each data structure wins and why.
+
 Four implementations sit behind one frozen `OrderBook` trait and were proven
 observationally identical by the differential oracle (`book/tests/oracle.rs`, four-way on
 the bounded band). What separates them is the **locate** step of `apply`:
@@ -183,26 +144,26 @@ from any memmove. `update` p50 (ns), by depth and touch locality (EPYC; values o
 **Concentrated (top-of-book-biased — the realistic case):**
 
 | depth | btree | sorted | rev | flat |
-|---|---|---|---|---|
-| 8 | 9 | 9 | 9 | 9 |
-| 128 | 19 | 19 | 9 | 9 |
-| 256 | 19 | 19 | 9 | 9 |
-| 2048 | 29 | 39 | 29 | 19 |
+| ----- | ----- | ------ | --- | ---- |
+| 8     | 9     | 9      | 9   | 9    |
+| 128   | 19    | 19     | 9   | 9    |
+| 256   | 19    | 19     | 9   | 9    |
+| 2048  | 29    | 39     | 29  | 19   |
 
 **Uniform (spread across the whole ladder — the adversarial case):**
 
 | depth | btree | sorted | rev | flat |
-|---|---|---|---|---|
-| 2 | 9 | 9 | 9 | 9 |
-| 256 | 39 | 19 | 79 | 9 |
-| 1024 | 39 | 29 | 259 | 9 |
-| 2048 | 49 | 29 | 519 | 9 |
+| ----- | ----- | ------ | --- | ---- |
+| 2     | 9     | 9      | 9   | 9    |
+| 256   | 39    | 19     | 79  | 9    |
+| 1024  | 39    | 29     | 259 | 9    |
+| 2048  | 49    | 29     | 519 | 9    |
 
 The crossover between the linear scan and the binary search is set by **where touches
 land**, not by depth. Under **uniform** touches `RevVecBook` pulls clear of the flat
 `SortedVecBook` line by depth ≈64 (rev 29 ns vs sorted 19 ns; both are floor-tied below
 that) and the gap widens to **519 ns vs 29 ns at depth 2048 — a ~18× loss**. Under
-**concentrated** touches `RevVecBook` *never loses within the swept range*: it holds 9–29 ns
+**concentrated** touches `RevVecBook` _never loses within the swept range_: it holds 9–29 ns
 through depth 2048, staying at or below even `SortedVecBook` (which climbs to 39 ns as its
 binary-search dependent-load chain lengthens), because concentrated touches scan only the
 top 1–2 levels regardless of book depth. `FlatBook`'s direct index is essentially flat —
@@ -213,13 +174,13 @@ binary-search floor without paying any locate cost, and never degrades with dept
 
 ### 3.2 The real-data inversion (`throughput.csv` + `flat_memory.csv`)
 
-This is the headline. Whole-corpus replay, no pacing, median of 31 runs — **service
-time.** ns/event, from `throughput.csv`:
+This is the headline. Whole-corpus replay (median of 31 runs, service time). ns/event,
+from `throughput.csv`:
 
-| corpus | flat | sorted | rev | btree |
-|---|---|---|---|---|
-| steady (synthetic, narrow) | **7.46** | 10.44 | 12.45 | 19.47 |
-| btcusdt-sample (real, wide) | 10,896.43 | 59.62 | 191.00 | **37.79** |
+| corpus                      | flat      | sorted | rev    | btree     |
+| --------------------------- | --------- | ------ | ------ | --------- |
+| steady (synthetic, narrow)  | **7.46**  | 10.44  | 12.45  | 19.47     |
+| btcusdt-sample (real, wide) | 10,896.43 | 59.62  | 191.00 | **37.79** |
 
 On the narrow synthetic book the array structures win — `FlatBook` leads at 7.46
 ns/event, `BTreeBook` trails at 19.47. **On the real BTCUSDT corpus the ranking fully
@@ -265,16 +226,18 @@ regime that defeats a linear scan.
 
 ### 3.4 Which structure when (sourced)
 
-| regime | use | sourced basis (EPYC) |
-|---|---|---|
-| shallow, top-concentrated | `RevVecBook` or `SortedVecBook` | `update` p50 ~9 ns at the floor, depths 8–256 concentrated; both at/below `BTreeBook`'s 19 ns (`service_sweep.csv`) |
-| deep, spread across the ladder | `SortedVecBook` | `update` p50 29 ns at depth 2048 uniform vs `RevVecBook` 519 ns, `BTreeBook` 49 ns (`service_sweep.csv`) |
-| deep, **wide / unbounded** price range (the real feed) | `BTreeBook` | leads the real BTCUSDT replay at 37.79 ns/event vs sorted 59.62, rev 191.00, flat 10,896.43 (`throughput.csv`); span-agnostic where `FlatBook` needs 88 MiB (`flat_memory.csv`) |
-| deep, **bounded** span, warm/amortized book | `FlatBook` | `update` p50 ~9 ns regardless of depth/locality (`service_sweep.csv`) and 7.46 ns/event on the bounded synthetic steady corpus (`throughput.csv`) at 131,088 bytes (`flat_memory.csv`) — **only** when the span is bounded and the recenter cost is not paid on a cold wide-span replay |
+| regime                                                 | use                             | sourced basis (EPYC)                                                                                                                                                                                                                                                                    |
+| ------------------------------------------------------ | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| shallow, top-concentrated                              | `RevVecBook` or `SortedVecBook` | `update` p50 ~9 ns at the floor, depths 8–256 concentrated; both at/below `BTreeBook`'s 19 ns (`service_sweep.csv`)                                                                                                                                                                     |
+| deep, spread across the ladder                         | `SortedVecBook`                 | `update` p50 29 ns at depth 2048 uniform vs `RevVecBook` 519 ns, `BTreeBook` 49 ns (`service_sweep.csv`)                                                                                                                                                                                |
+| deep, **wide / unbounded** price range (the real feed) | `BTreeBook`                     | leads the real BTCUSDT replay at 37.79 ns/event vs sorted 59.62, rev 191.00, flat 10,896.43 (`throughput.csv`); span-agnostic where `FlatBook` needs 88 MiB (`flat_memory.csv`)                                                                                                         |
+| deep, **bounded** span, warm/amortized book            | `FlatBook`                      | `update` p50 ~9 ns regardless of depth/locality (`service_sweep.csv`) and 7.46 ns/event on the bounded synthetic steady corpus (`throughput.csv`) at 131,088 bytes (`flat_memory.csv`) — **only** when the span is bounded and the recenter cost is not paid on a cold wide-span replay |
 
 ---
 
 ## 4. The concurrency primitives
+
+This section evaluates the seqlock and broadcast ring independently before considering the complete engine.
 
 Both primitives live in `sync`, which — like every crate here — is
 `#![forbid(unsafe_code)]`: shared concurrent mutation is expressed with atomics, not
@@ -289,12 +252,12 @@ The seqlock publishes a `TopOfBook` via a version counter: many readers take an
 optimistic snapshot and retry only if a write straddled the read. Read latency under a
 contending writer, by reader count `K` and writer mode (`seqlock_read.csv`, EPYC):
 
-| mode | K | read p50 | read p99 | read p99.9 | samples |
-|---|---|---|---|---|---|
-| full_tilt | 1 | 10 ns | 10 ns | 10 ns | 1,000,000 |
-| full_tilt | 2 | 10 ns | 10 ns | 10 ns | 2,000,000 |
-| paced | 1 | 10 ns | 10 ns | 10 ns | 1,000,000 |
-| paced | 2 | 10 ns | 10 ns | 10 ns | 2,000,000 |
+| mode      | K   | read p50 | read p99 | read p99.9 | samples   |
+| --------- | --- | -------- | -------- | ---------- | --------- |
+| full_tilt | 1   | 10 ns    | 10 ns    | 10 ns      | 1,000,000 |
+| full_tilt | 2   | 10 ns    | 10 ns    | 10 ns      | 2,000,000 |
+| paced     | 1   | 10 ns    | 10 ns    | 10 ns      | 1,000,000 |
+| paced     | 2   | 10 ns    | 10 ns    | 10 ns      | 2,000,000 |
 
 A `load()` costs **~10 ns p50** (at the clock floor) and stays there through **p99.9** in
 every cell, flat across reader count and writer mode. The optimistic-retry rate
@@ -322,10 +285,10 @@ streams `[u64; W]` records and **never blocks** (it overwrites on wrap); each co
 reads the whole stream from its own cursor and **detects overrun** rather than corrupting
 silently. Latency, `full_tilt`, by consumer count `K` (`ring_bench.csv`, EPYC):
 
-| K | push p50 | push p99 | recv p50 | recv p99 |
-|---|---|---|---|---|
-| 1 | 10 ns | 10 ns | 10 ns | 140 ns |
-| 2 | 10 ns | 10 ns | 10 ns | 300 ns |
+| K   | push p50 | push p99 | recv p50 | recv p99 |
+| --- | -------- | -------- | -------- | -------- |
+| 1   | 10 ns    | 10 ns    | 10 ns    | 140 ns   |
+| 2   | 10 ns    | 10 ns    | 10 ns    | 300 ns   |
 
 `push` p50 is **10 ns** and `try_recv` p50 **10 ns** — at the clock floor, and **flat as K
 rises**. The flatness is the direct false-sharing-free signal: slots are
@@ -335,7 +298,7 @@ over exactly and adjacent consumers do not invalidate each other's lines. Verifi
 structurally by the `size_of::<Slot<W>>() % 64 == 0` static assertion and behaviorally by
 the flat `recv` latency.
 
-**Producer broadcast throughput is *not* flat — an honest negative result**
+**Producer broadcast throughput is _not_ flat — an honest negative result**
 (`producer_mev_s`, `full_tilt`): **12.17 → 8.46 Mev/s at K=1,2**, a ~1.4× decline over the
 one step measured on this box. This is **not** false sharing (it persists with flat per-op
 latency); it is **true sharing on the one genuinely-shared word, the write cursor**. Every
@@ -392,12 +355,9 @@ and record end-to-end latency. **Response time, coordinated-omission-correct:** 
 producer stamps each event's `ts` with its scheduled arrival before processing, and each
 consumer records `completion − scheduled_arrival`.
 
-**Scope note.** The Phase-8 end-to-end benchmark was **outside the metal re-run scope**
-(Phases 4/6/7/9), so the numbers in this section are the earlier laptop (i5-1135G7)
-baseline, labeled as such and not comparable in absolute ns to the EPYC sections. The metal
-run independently re-confirmed the two primitives this pipeline composes (§4) and directly
-observed, via `perf c2c`, the true-sharing mechanism this section reports end-to-end — so
-the *mechanism* is metal-confirmed even though the pipeline latency here is not re-measured.
+\*Note. The end-to-end pipeline benchmark was not re-run on the EPYC host. This section
+reports the earlier Intel baseline and is included for completeness rather than direct
+comparison with the hardware-specific measurements above.
 
 **Real-corpus headline (BTCUSDT replay, speed 1, `BTreeBook`, laptop):** at K=1 the
 pipeline runs **5,227 ns p50 / 128,767 ns p99** over 13,765 events (`e2e.csv`). The pipeline
@@ -432,50 +392,31 @@ consumer (`engine/tests/pipeline.rs` and the deterministic overrun test in
 
 ## 6. Microarchitecture summary — now with native AMD Zen4 counters
 
+This section explains _why_ the observed performance differences occur using hardware performance counters.
+
 The four implementations form a microarchitecture taxonomy. On the laptop it was
-*predicted* from PMU-free behavioral signatures; on the EPYC box the native AMD Zen4
+_predicted_ from PMU-free behavioral signatures; on the EPYC box the native AMD Zen4
 pipeline-utilization counters **confirm** it (`perf/perf_btree.txt`, `perf_sorted.txt`,
 `perf_rev.txt`, `perf_flat.txt`; apply hot loop, depth 2048 uniform, 200 M iters). The AMD
 buckets are the architectural counterpart to Intel TMA — **retiring / bad-speculation /
 frontend-bound / backend-bound(memory|cpu)** — not Intel TMA relabeled
 ([`PROFILING.md`](PROFILING.md) maps each Zen4 event). Headline counters:
 
-| impl | IPC | retiring | bad-spec | frontend | backend-mem | branch-miss | verdict |
-|---|---|---|---|---|---|---|---|
-| `SortedVecBook` | 2.50 | 40.2 % | **0.1 %** | 0.7 % | **50.5 %** | 0.04 % | **Memory Bound** (branchless locate) |
-| `BTreeBook` | 1.33 | 20.1 % | 28.3 % | 21.4 % | 9.1 % | 8.12 % | Memory Bound + frontend (pointer chase) |
-| `RevVecBook` | 6.10 | **93.8 %** | 1.3 % | 1.4 % | 2.3 % | 0.14 % | Core/Retiring (scan length) |
-| `FlatBook` | 2.43 | 39.0 % | 25.5 % | 17.6 % | 13.4 % | 3.80 % | mispredict-bound at wide uniform depth |
+| impl            | IPC  | retiring   | bad-spec  | frontend | backend-mem | branch-miss | verdict                                 |
+| --------------- | ---- | ---------- | --------- | -------- | ----------- | ----------- | --------------------------------------- |
+| `SortedVecBook` | 2.50 | 40.2 %     | **0.1 %** | 0.7 %    | **50.5 %**  | 0.04 %      | **Memory Bound** (branchless locate)    |
+| `BTreeBook`     | 1.33 | 20.1 %     | 28.3 %    | 21.4 %   | 9.1 %       | 8.12 %      | Memory Bound + frontend (pointer chase) |
+| `RevVecBook`    | 6.10 | **93.8 %** | 1.3 %     | 1.4 %    | 2.3 %       | 0.14 %      | Core/Retiring (scan length)             |
+| `FlatBook`      | 2.43 | 39.0 %     | 25.5 %    | 17.6 %   | 13.4 %      | 3.80 %      | mispredict-bound at wide uniform depth  |
 
-- **`SortedVecBook` — Memory Bound, hardware-confirmed** (a prediction confirmed, see §7):
-  **50.5 % backend-bound-memory with only 0.1 % bad-speculation and 0.04 % branch-miss**
-  (`perf_sorted.txt`). Its binary search is a chain of `O(log n)` dependent loads in one
-  contiguous array; the counters put the stall squarely on memory, not on speculation —
-  exactly the PMU-free prediction.
-- **`BTreeBook` — Memory Bound + frontend, pointer chase.** Lowest IPC (1.33), highest
-  branch-miss (8.12 %), and a large frontend-bound-latency component (21.4 %): each descent
-  step is a dependent load to a scattered node, so the prefetcher cannot run ahead and the
-  front end stalls waiting on the next node address (`perf_btree.txt`).
-- **`RevVecBook` — Core/Retiring.** **93.8 % retiring at IPC 6.10** (`perf_rev.txt`) — the
-  scan simply executes and retires a huge number of compare-and-advance instructions; its
-  cost is retired-instruction count (scan length), not cache or speculation.
-- **`FlatBook` — retiring in-span, mispredict-bound at wide uniform depth.** At depth-2048
-  uniform its apply carries **25.5 % bad-speculation and 3.80 % branch-miss**
-  (`perf_flat.txt`) — the scattered writes across a wide flat array feed data-dependent
-  bounds/recenter branches. This is the counter-level shadow of the real-data collapse: the
-  wider the span, the worse the flat array's speculation and memory behavior.
-
-The misprediction finding (from `branch_experiment.csv`, **laptop PMU-free baseline**): a
-branchy binary search over **random** keys with all data in L1 is **5.1× slower** than over
-predictable keys (36.093 vs 7.019 ns p50, depth 256) — a **+29.07 ns** pure-misprediction
-penalty, rising to **+35.9 ns** at depth 16384. A branchless `cmov` search
-(`std::hint::select_unpredictable`) is flat across predictability. The EPYC counters confirm
-the mechanism at the impl level: the shipped `SortedVecBook`'s branchless locate shows
-**0.04 % branch-miss / 0.1 % bad-spec** (`perf_sorted.txt`), while the branchy pointer-chase
-`BTreeBook` shows **8.12 % branch-miss / 28.3 % bad-spec** — the branch-miss delta the
-laptop 2×2 predicted, now on an AMD counter. Figures:
-`plots/branch_misprediction_2x2.svg`, `plots/cache_footprint_latency.svg` (both laptop
-behavioral experiments).
+The one-line verdict per implementation is the table's last column — `SortedVecBook`
+**memory-bound** (the refuted speculation hypothesis, §7), `BTreeBook` a **memory-bound
+pointer chase** with a frontend tax, `RevVecBook` **core/retiring** (cost = scan length),
+and `FlatBook` minimal-retiring in-span but **mispredict-bound at wide uniform depth**, the
+counter-level shadow of the §3.2 real-data collapse. The per-implementation mechanism behind
+each verdict, the full Top-Down decomposition, the cache-footprint curve, and the
+branch-misprediction 2×2 (`branch_experiment.csv`) that predicted the taxonomy before the
+counters confirmed it are the subject of [`PROFILING.md`](PROFILING.md).
 
 ---
 
@@ -497,7 +438,7 @@ These are featured, not buried — they are what makes the work checkable.
   case — **0.1 % bad-speculation, 0.04 % branch-miss, 50.5 % backend-bound-memory**
   (`perf_sorted.txt`). The shipped sorted book pays no branch-misprediction penalty; it is
   Memory Bound by its dependent-load chain, and the AMD backend-bound counter says so
-  directly. The PMU-free behavioral signature *predicted* this before silicon *confirmed*
+  directly. The PMU-free behavioral signature _predicted_ this before silicon _confirmed_
   it — the stronger form of the finding.
 - **The true-sharing decline — inferred on the laptop, measured on EPYC.** The SPMC ring's
   producer throughput falls (~1.4× over 1→2 consumers here, ~2.5× over 1→4 on the laptop) —
@@ -505,7 +446,7 @@ These are featured, not buried — they are what makes the work checkable.
   hypothesis. The cause is now directly observed: `perf c2c` shows cross-CCD HITM
   concentrated on the single shared write cursor (60.0 % of ring LLC-misses to remote-cache
   HITM, 99 store refs on that line) and **none on the aligned slots** (§4.2). The `align(64)`
-  discipline eliminated *false* sharing; what remains is the *true* sharing any SPMC
+  discipline eliminated _false_ sharing; what remains is the _true_ sharing any SPMC
   broadcast inherits, and the producer stays wait-free — the rate falls, the progress
   guarantee does not.
 - **PMU-free predicted, AMD-counter confirmed.** The whole microarchitecture story was
@@ -528,26 +469,25 @@ These are featured, not buried — they are what makes the work checkable.
 
 ## 8. Reproducibility & artifacts
 
-The committed CSVs under `bench/results/` are the source of truth; this document re-derives
-every number from them. The exact regeneration commands are in §2. Per-claim provenance
-(EPYC unless marked):
+Every numerical claim in this document is derived from committed benchmark artifacts under
+`bench/results/`. The table below maps each claim to its source dataset.
 
-| claim group | source | host |
-|---|---|---|
-| crossover, `D*`, FlatBook flat service curve | `service_sweep.csv` (+ `.hgrm`) | EPYC |
-| read path, `top_n_full`, best access | `read_path.csv` | EPYC |
-| real-data inversion, synthetic throughput | `throughput.csv` | EPYC |
-| FlatBook span / memory tradeoff | `flat_memory.csv` | host-independent (span/bytes) |
-| sustained CO-correct response, saturation | `sustained.csv` | EPYC |
-| seqlock read/write latency, retry rate | `seqlock_read.csv` | EPYC |
-| ring push/recv latency, throughput, overrun | `ring_bench.csv` | EPYC |
-| AMD Zen4 pipeline utilization (per impl) | `perf/perf_{btree,sorted,rev,flat}.txt` | EPYC |
-| cache-line contention (HITM, true vs false sharing) | `perf/c2c_ring.txt`, `perf/c2c_seqlock.txt` | EPYC |
-| end-to-end latency, saturation, true sharing | `e2e.csv` | **laptop baseline** (not re-run on EPYC) |
-| misprediction 2×2, branchless elimination | `branch_experiment.csv` | **laptop baseline** (PMU-free behavioral) |
-| cache-footprint latency curve | `cache_experiment.csv` | **laptop baseline** (PMU-free behavioral) |
-| environment, corpora fingerprints, clock floor | `env.json` | EPYC |
-| earlier PMU-unavailable condition (historical) | `perf/perf_unavailable.txt`, `perf/perf_summary.csv` | laptop (superseded by `perf/perf_*.txt`) |
+| claim group                                         | source                                               | host                                      |
+| --------------------------------------------------- | ---------------------------------------------------- | ----------------------------------------- |
+| crossover, `D*`, FlatBook flat service curve        | `service_sweep.csv` (+ `.hgrm`)                      | EPYC                                      |
+| read path, `top_n_full`, best access                | `read_path.csv`                                      | EPYC                                      |
+| real-data inversion, synthetic throughput           | `throughput.csv`                                     | EPYC                                      |
+| FlatBook span / memory tradeoff                     | `flat_memory.csv`                                    | host-independent (span/bytes)             |
+| sustained CO-correct response, saturation           | `sustained.csv`                                      | EPYC                                      |
+| seqlock read/write latency, retry rate              | `seqlock_read.csv`                                   | EPYC                                      |
+| ring push/recv latency, throughput, overrun         | `ring_bench.csv`                                     | EPYC                                      |
+| AMD Zen4 pipeline utilization (per impl)            | `perf/perf_{btree,sorted,rev,flat}.txt`              | EPYC                                      |
+| cache-line contention (HITM, true vs false sharing) | `perf/c2c_ring.txt`, `perf/c2c_seqlock.txt`          | EPYC                                      |
+| end-to-end latency, saturation, true sharing        | `e2e.csv`                                            | **laptop baseline** (not re-run on EPYC)  |
+| misprediction 2×2, branchless elimination           | `branch_experiment.csv`                              | **laptop baseline** (PMU-free behavioral) |
+| cache-footprint latency curve                       | `cache_experiment.csv`                               | **laptop baseline** (PMU-free behavioral) |
+| environment, corpora fingerprints, clock floor      | `env.json`                                           | EPYC                                      |
+| earlier PMU-unavailable condition (historical)      | `perf/perf_unavailable.txt`, `perf/perf_summary.csv` | laptop (superseded by `perf/perf_*.txt`)  |
 
 Figures are under `bench/results/plots/` and each is generated from its committed CSV by
 `bench plot`. The mechanistic teardown is [`PROFILING.md`](PROFILING.md); the interim

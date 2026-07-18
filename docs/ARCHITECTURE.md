@@ -9,27 +9,28 @@ boundary sits where it does. The performance numbers live in
 
 ## 1. Thesis
 
-Four design commitments shape every boundary in this repo. They are stated here and shown
-in the sections that follow.
+Four engineering principles determine every architectural boundary in this repository.
+They are stated here and shown in the sections that follow.
 
 - **Sans-IO discipline.** The order-book logic (`book`) knows nothing about where events
   come from or where snapshots go. It is a pure state machine over integer events: feed it
   an event, it mutates; ask it for the top of book, it answers. No sockets, no async, no
-  allocation in the hot path, no dependencies. The *what* is separated from the *how*, so
+  allocation in the hot path, no dependencies. The _what_ is separated from the _how_, so
   one frozen core drives every harness, every primitive, and the assembled engine
   unchanged.
 - **Measure, never guess.** No design choice between implementations is argued from
   intuition. Four order-book structures sit behind one trait precisely so they can be
-  measured against each other under coordinated-omission-correct load; the verdict
-  (§3, [`BENCHMARKS.md`](BENCHMARKS.md)) is a number, and it inverted the intuition.
+  measured against each other under coordinated-omission-correct load; the verdict is a
+  number, not an opinion (the numbers themselves are [`BENCHMARKS.md`](BENCHMARKS.md)).
 - **One abstraction, many implementations.** The `OrderBook` trait is the product; the
-  four structures are instances. The differential oracle proves them observationally
-  identical, so swapping one for another is sound, and no logic is copy-pasted across them.
-- **Honesty is the signal.** The writeups feature what underperformed — the flat array
-  collapsing on real data, a predicted bottleneck refuted, a throughput decline the
-  original hypothesis did not predict, a PMU-free prediction later *confirmed* against
-  native AMD Zen 4 counters on rented bare metal. An honest negative result with a profile
-  is the elite signal; this architecture is built to surface them, not bury them.
+  four structures are instances. Tthe differential oracle shows them to be observationally
+  identical across its randomized and adversarial test corpus, so swapping one for
+  another is sound, and no logic is copy-pasted across them.
+- **Report negative results.** Negative results are documented as carefully as
+  positive ones. The flat-array implementation collapsing on real data, the
+  refuted branch-prediction hypothesis, and throughput regressions are retained
+  because understanding why an optimization failed is often more valuable than
+  another successful benchmark.
 
 ---
 
@@ -63,18 +64,18 @@ crate depends on and nothing depends back into:
 
 What each crate owns:
 
-| crate | owns | depends on |
-|---|---|---|
-| `book` | the `OrderBook` trait, the four implementations, the `BookEvent` model, the `Px`/`Qty` integer tick types, the differential oracle | nothing (no third-party deps) |
-| `feed` | the binary corpus format, the deterministic replay iterator, the synthetic load-profile generator, and the **quarantined** live recorder | `book` |
-| `sync` | the two lock-free primitives — a single-writer/many-reader seqlock and a single-producer/many-consumer broadcast ring | nothing (std atomics; `loom` under `cfg(loom)`) |
-| `engine` | the assembly: the pinned `book → seqlock → ring → consumers` pipeline and the `BookEvent ↔ [u64; 5]` packing | `book`, `sync` |
-| `bench` | the coordinated-omission-correct harness, every benchmark, the profiling scaffolding, and the SVG plotter | `book`, `sync`, `feed`, `engine` |
+| crate    | owns                                                                                                                                     | depends on                                      |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| `book`   | the `OrderBook` trait, the four implementations, the `BookEvent` model, the `Px`/`Qty` integer tick types, the differential oracle       | nothing (no third-party deps)                   |
+| `feed`   | the binary corpus format, the deterministic replay iterator, the synthetic load-profile generator, and the **quarantined** live recorder | `book`                                          |
+| `sync`   | the two lock-free primitives — a single-writer/many-reader seqlock and a single-producer/many-consumer broadcast ring                    | nothing (std atomics; `loom` under `cfg(loom)`) |
+| `engine` | the assembly: the pinned `book → seqlock → ring → consumers` pipeline and the `BookEvent ↔ [u64; 5]` packing                             | `book`, `sync`                                  |
+| `bench`  | the coordinated-omission-correct harness, every benchmark, the profiling scaffolding, and the SVG plotter                                | `book`, `sync`, `feed`, `engine`                |
 
 **The async / float quarantine.** Two things are banned from every measured path and
-permitted in exactly one place. *Floats* exist only inside the `recorder` binary, at the
+permitted in exactly one place. _Floats_ exist only inside the `recorder` binary, at the
 exchange-string parse edge, converted to integer ticks before anything reaches the corpus.
-*Async* (tokio and the TLS/websocket stack) is pulled in only by `feed`'s `recorder`
+_Async_ (tokio and the TLS/websocket stack) is pulled in only by `feed`'s `recorder`
 feature, which gates the `recorder` binary; the default `feed` tree links none of it
 (`cargo tree -p feed` proves it) and the replay path, the book, the primitives, the
 engine, and the harness are entirely synchronous. The corpus is the membrane: everything
@@ -115,7 +116,7 @@ streams (negative and extreme prices, crossed books, remove-absent, clear-then-r
 realloc churn) and asserts they produce identical observable state — best bid/ask, the
 full `top_n` ladder, depth, last trade — at every step. `BTreeBook`, `SortedVecBook`, and
 `RevVecBook` agree everywhere; `FlatBook` joins the four-way check on the bounded price
-band that is its defined domain. Because the four are proven observationally identical, the
+band that is its defined domain. Because the four are validated by the differential oracle, the
 benchmark differences are pure performance, not behavior.
 
 **The freeze.** `book` was frozen after the oracle passed (git tag `book-v1-frozen`); its
@@ -147,7 +148,7 @@ editing is a core you have not actually specified.
   integer"; from there the corpus carries only integers.
 
 Why this boundary is load-bearing: **a replayable corpus is the precondition for a
-falsifiable benchmark.** Because every run replays the identical committed byte stream (the
+reproducible benchmark.** Because every run replays the identical committed byte stream (the
 corpora are fingerprinted in `env.json`), a latency number is reproducible up to machine
 timing noise and a reviewer can re-derive it. If the benchmark consumed a live feed, no
 number could be checked twice. The quarantine guarantees the measured path never pays for
@@ -172,9 +173,8 @@ snapshot is consistent — otherwise it retries (`sync/src/seqlock.rs`). The ord
 carried entirely by the `seq` counter: payload words are `Relaxed`, and the
 `Release`/`Acquire` pairings (a writer's even-marker happens-before the reader's confirming
 load) make a torn snapshot **detectable and discarded**, never returned. The writer is
-**wait-free** — it never inspects or waits on a reader — which is the property a
-`Mutex<TopOfBook>` cannot offer and the reason reader count does not tax writer latency
-(measured in [`BENCHMARKS.md`](BENCHMARKS.md) §4.1).
+**wait-free** — it never inspects or waits on a reader — a property a
+mutex-protected snapshot cannot provide.
 
 ### 5.2 The SPMC broadcast ring
 
@@ -189,10 +189,9 @@ the consumer resyncs to the oldest resident record. The per-slot stamp is what l
 broadcast bus detect lapping without coordinating with consumers — the producer **never
 blocks** (it overwrites on wrap), so no consumer can stall it. Slots are
 `#[repr(align(64))]`, one per cache line, with the write cursor isolated on its own line, a
-static `size_of::<Slot<W>>() % 64 == 0` assertion enforcing it. The EPYC re-run's 64 B
-cache line validates the alignment, and `perf c2c` directly measured the intended effect:
-no false-sharing HITM on the aligned slots, and the only true-sharing HITM on the single
-shared write cursor ([`BENCHMARKS.md`](BENCHMARKS.md) §4.2).
+static `size_of::<Slot<W>>() % 64 == 0` assertion enforcing it. The layout puts each slot
+and the shared cursor on disjoint cache lines so adjacent consumers cannot false-share; the
+only genuinely shared word is the single write cursor every consumer must poll.
 
 ### 5.3 The zero-`unsafe` decision
 
@@ -203,10 +202,10 @@ non-atomic bytes without a happens-before edge, even though the version counter 
 discard a torn read. The discard does not retroactively make the race defined. The sound
 alternative is to make the payload itself atomic: store each word as an `AtomicU64`
 accessed `Relaxed`, and carry ordering with the version/stamp counter and `Acquire`/
-`Release` fences. A torn read then reads *stale-but-valid* atomic words and is detected by
+`Release` fences. A torn read then reads _stale-but-valid_ atomic words and is detected by
 the counter check — defined behavior throughout. Both primitives took this route, the whole
-workspace is `#![forbid(unsafe_code)]`, and the unsafe budget went unspent. Atomics, not
-`UnsafeCell`, are the correct tool for concurrent shared mutation here; the
+workspace is `#![forbid(unsafe_code)]`, and the workspace therefore remains `#![forbid(unsafe_code)]`.
+Atomics, not `UnsafeCell`, are the correct tool for concurrent shared mutation here; the
 compiler-enforced absence of `unsafe` is a capstone, not a constraint worked around.
 
 ---
@@ -249,8 +248,8 @@ corrupt word becomes a typed error, never undefined behavior, mirroring the reco
 validation at the float-string edge.
 
 **The overrun → resync composition** is the point where the two primitives compose. The
-ring guarantees the *full* stream but may lap a slow consumer; the seqlock guarantees the
-*latest* state and never laps. So when a consumer's `poll` returns `Overrun { skipped }`,
+ring guarantees the _full_ stream but may lap a slow consumer; the seqlock guarantees the
+_latest_ state and never laps. So when a consumer's `poll` returns `Overrun { skipped }`,
 it does not lose correctness — it loads a consistent snapshot from the seqlock, rebases its
 derived state (the mid-price) from that snapshot, and resumes from the ring's oldest
 resident record. A consumer that falls behind under a burst self-heals from the
@@ -260,31 +259,21 @@ stays wait-free throughout (it never waits on any consumer).
 
 ---
 
-## 7. Measurement methodology
+## 7. The measurement harness (`bench`)
 
-`bench` is the coordinated-omission-correct harness, and its discipline is what makes the
-numbers trustworthy:
+`bench` is the coordinated-omission-correct harness — the crate that turns "measure, never
+guess" into a reproducible process. Architecturally it is built around one discipline: it
+keeps **service time** (the cost of an operation, timed with no arrival process) and
+**response time** (`completion − scheduled_arrival` under an open-loop arrival process,
+which charges accumulated backlog to every late event's tail) strictly separate, so a
+saturation tail can never be mistaken for a service cost. Every benchmark writes a committed
+CSV under `bench/results/`, alongside an `env.json` capture of the environment, and the
+plots are regenerated from those same CSVs by `bench plot` — every quantitative claim in this
+repository can be traced back to a committed CSV.
 
-- **Service time vs response time are never blurred.** Service-time benchmarks (the
-  per-op service sweep, the read path, whole-corpus throughput, the primitive
-  micro-benchmarks) time the operation with no arrival process. Response-time benchmarks
-  (sustained load, end-to-end) run open-loop and stamp each event's scheduled arrival, then
-  record `completion − scheduled_arrival` — so a system that falls behind charges the
-  backlog to every late event's tail. The CO correction is itself unit-tested
-  (`co_correct_records_accumulating_lag`).
-- **Hygiene on every cell:** inputs and outputs wrapped in `black_box`; the pinned core
-  warmed before recording; ≥1,000,000 samples per service cell (10,000,384 lookups per
-  branch-experiment cell); the measured clock read-read floor (~10 ns on the EPYC re-run
-  host; 7 ns on the archived laptop) reported and **never subtracted**; threads pinned; the
-  CPU governor recorded (`performance` on the EPYC box, pinned to one CCD-0 core).
-- **Every number is sourced.** Each benchmark writes a committed CSV under
-  `bench/results/`, and the environment (CPU, caches, governor, kernel, rustc, pinned core,
-  clock floor, corpus fingerprints) is captured in `env.json`. The writeups re-derive every
-  headline from those CSVs and cite the file inline; nothing is computed by hand or
-  invented. Plots are generated from the same CSVs by `bench plot`.
-
-This is the measure-never-guess principle made mechanical: a claim that cannot point at a
-committed file is not made.
+The full methodology — sampling, hygiene (`black_box`, warm-up, the never-subtracted clock
+floor), the CO-correction and its unit test, and per-claim provenance — is documented where
+the numbers live, in [`BENCHMARKS.md`](BENCHMARKS.md).
 
 ---
 
@@ -292,16 +281,16 @@ committed file is not made.
 
 Each NORTH-STAR engineering principle maps to a specific decision in this repo:
 
-| principle | concrete decision |
-|---|---|
-| Sans-IO discipline | `book` has zero I/O, async, or dependencies; the same frozen core drives feed, bench, engine, and profiling unchanged (§3) |
-| Measure, never guess | four implementations behind one trait, judged by `throughput.csv` — the verdict inverted the intuition (§3, [`BENCHMARKS.md`](BENCHMARKS.md) §3.2) |
-| Distributions, not averages | every benchmark reports p50/p99/p99.9 + histograms (`.hgrm`); the CO-correct sustained/e2e tail is where saturation shows |
-| Mechanical sympathy | thread pinning (producer on one CCD-0 core, readers across CCDs), cache-line-aligned ring slots (`align(64)`, validated by the EPYC 64 B line + `perf c2c`), the recorded clock floor (~10 ns EPYC), `target-cpu=native` for valid microarchitecture profiling |
-| One abstraction, many impls | the `OrderBook` trait is the product; the differential oracle proves the four instances identical, so no logic is duplicated (§3) |
-| Report negative results | the real-data inversion, the SortedVec=memory-bound refutation (confirmed at 50.5 % AMD backend-bound-memory / 0.1 % bad-spec), and the ring's true-sharing throughput decline (measured via `perf c2c`) are documented alongside the wins (§1, [`BENCHMARKS.md`](BENCHMARKS.md) §7) |
-| Simple and fast beats clever | the zero-`unsafe` atomic-payload seqlock/ring over the `UnsafeCell` + memcpy shortcut — sound and measured at the clock floor, no cleverness the telemetry did not justify (§5.3) |
-| Freeze the core | `book` frozen at `book-v1-frozen`; later work builds on it additively |
+| principle                   | concrete decision                                                                                                                                                                                                                         |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Sans-IO discipline          | `book` has zero I/O, async, or dependencies; the same frozen core drives feed, bench, engine, and profiling unchanged (§3)                                                                                                                |
+| Measure, never guess        | four implementations behind one trait, measured against each other under one CO-correct harness so the verdict is a number, not an opinion (§3; numbers in [`BENCHMARKS.md`](BENCHMARKS.md))                                              |
+| Distributions, not averages | every benchmark reports p50/p99/p99.9 + histograms (`.hgrm`); the CO-correct sustained/e2e path is where a saturation tail surfaces (§7)                                                                                                  |
+| Mechanical sympathy         | thread pinning (producer on one CCD-0 core, readers across CCDs), cache-line-aligned ring slots (`align(64)`, cursor isolated on its own line), and `target-cpu=native` builds (§5.2, §6)                                                 |
+| One abstraction, many impls | the `OrderBook` trait is the product; the differential oracle validates the four instances identical, so no logic is duplicated (§3)                                                                                                      |
+| Report negative results     | the real-data inversion, the `SortedVecBook` memory-bound refutation, and the ring's true-sharing throughput decline are documented alongside the wins (§1; analyzed in [`BENCHMARKS.md`](BENCHMARKS.md), [`PROFILING.md`](PROFILING.md)) |
+| Soundness before cleverness | the zero-`unsafe` atomic-payload seqlock/ring over the `UnsafeCell` + memcpy shortcut — sound, with no cleverness the design did not require (§5.3)                                                                                       |
+| Freeze the core             | `book` frozen at `book-v1-frozen`; later work builds on it additively                                                                                                                                                                     |
 
 ---
 
@@ -309,9 +298,10 @@ Each NORTH-STAR engineering principle maps to a specific decision in this repo:
 
 The seqlock and the SPMC broadcast ring are general-purpose, market-data-agnostic
 concurrency primitives — a single-writer snapshot cell and a single-producer broadcast bus
-reusable in any system that needs lock-free state publication and fan-out.
+reusable outside market-data systems wherever a latest-value snapshot and
+loss-tolerant broadcast stream are required.
 
 ---
 
-*Numbers: [`BENCHMARKS.md`](BENCHMARKS.md). Microarchitecture: [`PROFILING.md`](PROFILING.md).
-Licensed `MIT OR Apache-2.0` (`LICENSE-MIT`, `LICENSE-APACHE`).*
+_Numbers: [`BENCHMARKS.md`](BENCHMARKS.md). Microarchitecture: [`PROFILING.md`](PROFILING.md).
+Licensed `MIT OR Apache-2.0` (`LICENSE-MIT`, `LICENSE-APACHE`)._
